@@ -1,0 +1,30 @@
+{
+  "name": "taskflow",
+  "private": true,
+  "type": "module",
+  "description": "TaskFlow: a MERN Kanban board with optimistic UI and race-condition-safe moves",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "concurrently -n server,client -c blue,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
+    "seed": "npm run seed -w server",
+    "test": "npm test -w server && npm test -w client",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "build": "npm run build -w client"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "concurrently": "^9.1.0",
+    "eslint": "^9.17.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.16",
+    "globals": "^15.14.0",
+    "prettier": "^3.4.2"
+  }
+}
