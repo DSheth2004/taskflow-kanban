@@ -7,25 +7,70 @@ import { workflow } from './workflow/index.js';
 
 const SEED = {
   todo: [
-    ['Set up OAuth login', 'Google + GitHub providers via passport.', 'High'],
-    ['Design empty states', 'Illustrations for empty columns and activity log.', 'Low'],
-    ['Write API rate limiter', 'Token bucket per IP on write routes.', 'Medium'],
-    ['Add keyboard shortcuts', 'N = new task, / = focus search, ? = help.', 'Low'],
-    ['Audit npm dependencies', 'Run npm audit and bump anything critical.', 'Medium'],
-    ['Plan Q3 roadmap review', 'Collect input from design and support.', 'Medium'],
+    ['Set up OAuth login', 'Google + GitHub providers via passport.', 'High', ['auth', 'backend']],
+    [
+      'Design empty states',
+      'Illustrations for empty columns and activity log.',
+      'Low',
+      ['design', 'ux'],
+    ],
+    [
+      'Write API rate limiter',
+      'Token bucket per IP on write routes.',
+      'Medium',
+      ['backend', 'security'],
+    ],
+    [
+      'Add keyboard shortcuts',
+      'N = new task, / = focus search, ? = help.',
+      'Low',
+      ['frontend', 'a11y'],
+    ],
+    [
+      'Audit npm dependencies',
+      'Run npm audit and bump anything critical.',
+      'Medium',
+      ['security', 'chore'],
+    ],
+    ['Plan Q3 roadmap review', 'Collect input from design and support.', 'Medium', ['planning']],
   ],
   in_progress: [
-    ['Migrate images to CDN', 'Move uploads from the API box to object storage.', 'High'],
-    ['Refactor board store', 'Split selectors from actions for readability.', 'Medium'],
-    ['Fix Safari drag ghosting', 'Drag preview renders offset on Safari 17.', 'High'],
-    ['Write onboarding emails', 'Three-email drip for new workspaces.', 'Low'],
+    [
+      'Migrate images to CDN',
+      'Move uploads from the API box to object storage.',
+      'High',
+      ['infra', 'performance'],
+    ],
+    [
+      'Refactor board store',
+      'Split selectors from actions for readability.',
+      'Medium',
+      ['frontend', 'refactor'],
+    ],
+    [
+      'Fix Safari drag ghosting',
+      'Drag preview renders offset on Safari 17.',
+      'High',
+      ['bug', 'frontend'],
+    ],
+    ['Write onboarding emails', 'Three-email drip for new workspaces.', 'Low', ['marketing']],
   ],
   done: [
-    ['Project scaffolding', 'Vite client, Express server, shared lint config.', 'Medium'],
-    ['Task CRUD endpoints', 'Create, read, update, delete with zod validation.', 'High'],
-    ['Database seeder', 'npm run seed resets the board to this data.', 'Low'],
-    ['CI pipeline', 'Lint and tests on every pull request.', 'Medium'],
-    ['Dark mode palette', 'Checked badge colours against WCAG AA.', 'Low'],
+    [
+      'Project scaffolding',
+      'Vite client, Express server, shared lint config.',
+      'Medium',
+      ['chore'],
+    ],
+    [
+      'Task CRUD endpoints',
+      'Create, read, update, delete with zod validation.',
+      'High',
+      ['backend', 'api'],
+    ],
+    ['Database seeder', 'npm run seed resets the board to this data.', 'Low', ['backend', 'dx']],
+    ['CI pipeline', 'Lint and tests on every pull request.', 'Medium', ['devops']],
+    ['Dark mode palette', 'Checked badge colours against WCAG AA.', 'Low', ['design', 'a11y']],
   ],
 };
 
@@ -37,10 +82,11 @@ async function seed() {
   await Promise.all([Task.deleteMany({}), Activity.deleteMany({})]);
 
   const docs = Object.entries(SEED).flatMap(([columnId, rows]) =>
-    rows.map(([title, description, priority], i) => ({
+    rows.map(([title, description, priority, tags], i) => ({
       title,
       description,
       priority,
+      tags,
       columnId,
       orderIndex: (i + 1) * STEP,
     }))

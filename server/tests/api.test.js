@@ -10,7 +10,6 @@ let replSet;
 const app = createApp();
 
 beforeAll(async () => {
-  // A replica set (not a standalone mongod) so transactions behave as they do on Atlas.
   replSet = await MongoMemoryReplSet.create({ replSet: { count: 1, storageEngine: 'wiredTiger' } });
   await connectDB(replSet.getUri('taskflow-test'));
   await Task.init();
@@ -28,7 +27,7 @@ beforeEach(async () => {
 
 const create = (body) => request(app).post('/api/tasks').send(body);
 const move = (id, body) => request(app).patch(`/api/tasks/${id}/move`).send(body);
-// Inserts tasks straight into any column (bypassing the workflow) to set up a scenario.
+
 const place = (...rows) =>
   Task.insertMany(rows.map(([title, columnId, orderIndex]) => ({ title, columnId, orderIndex })));
 const columnTitles = async (columnId) =>
@@ -46,6 +45,33 @@ describe('task CRUD', () => {
       version: 0,
     });
     expect(res.body.id).toMatch(/^[a-f\d]{24}$/);
+  });
+
+  it('stores tags normalised: trimmed, lower-case and de-duplicated', async () => {
+    const res = await create({ title: 'Tagged', tags: [' Backend ', 'api', 'backend'] });
+    expect(res.status).toBe(201);
+    expect(res.body.tags).toEqual(['backend', 'api']);
+    expect((await create({ title: 'Untagged' })).body.tags).toEqual([]);
+  });
+
+  it('rejects more than 5 tags or a tag longer than 20 characters', async () => {
+    expect((await create({ title: 'X', tags: ['a', 'b', 'c', 'd', 'e', 'f'] })).status).toBe(400);
+    expect((await create({ title: 'X', tags: ['x'.repeat(21)] })).status).toBe(400);
+  });
+
+  it('updates tags and logs them as a change only when they differ', async () => {
+    const { body: task } = await create({ title: 'T', tags: ['ui'] });
+    const same = await request(app)
+      .patch(`/api/tasks/${task.id}`)
+      .send({ tags: ['ui'], version: 0 });
+    expect(same.body.version).toBe(0);
+
+    const res = await request(app)
+      .patch(`/api/tasks/${task.id}`)
+      .send({ tags: ['ui', 'bug'], version: 0 });
+    expect(res.body).toMatchObject({ tags: ['ui', 'bug'], version: 1 });
+    const { body } = await request(app).get('/api/activity?limit=1');
+    expect(body.items[0].changes).toEqual(['tags']);
   });
 
   it('appends new tasks to the end of the column', async () => {
@@ -115,7 +141,6 @@ describe('moving tasks', () => {
     expect(res.body.task).toMatchObject({ columnId: 'in_progress', orderIndex: 1500, version: 1 });
     expect(await columnTitles('in_progress')).toEqual(['A', 'X', 'B']);
 
-    // Neighbours were not rewritten.
     const untouched = await Task.find({ _id: { $in: [a.id, b.id] } });
     expect(untouched.map((t) => t.version)).toEqual([0, 0]);
   });
@@ -133,7 +158,6 @@ describe('moving tasks', () => {
   });
 
   it('never ties with a card the client did not know about', async () => {
-    // The client thinks A is the last card in progress.
     const [a] = await place(['A', 'in_progress', 1000], ['Unseen', 'in_progress', 2000]);
     const x = (await create({ title: 'X' })).body;
 
@@ -164,7 +188,7 @@ describe('moving tasks', () => {
     const saved = await Task.findById(x.id);
     expect(saved.orderIndex).toBe(winner.orderIndex);
     expect(saved.version).toBe(1);
-    // Only the winning move was logged.
+
     expect(await Activity.countDocuments({ action: 'moved' })).toBe(1);
   });
 
