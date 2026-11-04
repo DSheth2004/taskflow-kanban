@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api/client';
-import { COLUMN_TITLES } from '../constants';
 import { useBoardStore } from '../store/boardStore';
+import { useSettingsStore } from '../store/settingsStore';
 import { XIcon } from './Icons';
 
 const POLL_MS = 10_000; // picks up other people's changes while the drawer is open
@@ -13,23 +13,23 @@ const ACTION_STYLE = {
   deleted: 'bg-rose-500',
 };
 
-function describe(entry) {
+function describe(entry, labelOf) {
   const title = <span className="font-medium">&ldquo;{entry.taskTitle}&rdquo;</span>;
   switch (entry.action) {
     case 'created':
       return (
         <>
-          Created {title} in {COLUMN_TITLES[entry.to]}
+          Created {title} in {labelOf(entry.to)}
         </>
       );
     case 'moved':
       return entry.from === entry.to ? (
         <>
-          Reordered {title} in {COLUMN_TITLES[entry.to]}
+          Reordered {title} in {labelOf(entry.to)}
         </>
       ) : (
         <>
-          Moved {title} from {COLUMN_TITLES[entry.from]} to {COLUMN_TITLES[entry.to]}
+          Moved {title} from {labelOf(entry.from)} to {labelOf(entry.to)}
         </>
       );
     case 'updated':
@@ -54,6 +54,10 @@ const timeFormat = new Intl.DateTimeFormat(undefined, {
 
 export default function ActivityDrawer({ open, onClose }) {
   const activityVersion = useBoardStore((s) => s.activityVersion);
+  // Labels come from the workflow; ids of states that no longer exist are shown as-is.
+  const labelOf = useBoardStore((s) => s.workflow?.labelOf) ?? ((id) => id);
+  const actor = useSettingsStore((s) => s.actor);
+  const setActor = useSettingsStore((s) => s.setActor);
   // Kept together so a poll can merge the newest page without losing older loaded pages.
   const [log, setLog] = useState({ items: [], cursor: null });
   const [state, setState] = useState('idle'); // idle | loading | error
@@ -112,7 +116,7 @@ export default function ActivityDrawer({ open, onClose }) {
         aria-hidden
       />
       <aside
-        className={`fixed inset-y-0 right-0 z-30 flex w-full max-w-sm flex-col bg-white shadow-2xl transition-transform duration-300 ease-out dark:bg-slate-900 dark:ring-1 dark:ring-slate-800 ${
+        className={`fixed inset-y-0 right-0 z-30 flex w-full max-w-sm flex-col bg-white pb-[env(safe-area-inset-bottom)] shadow-2xl transition-transform duration-300 ease-out dark:bg-slate-900 dark:ring-1 dark:ring-slate-800 ${
           open ? 'translate-x-0' : 'translate-x-full'
         }`}
         aria-label="Activity log"
@@ -126,7 +130,20 @@ export default function ActivityDrawer({ open, onClose }) {
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4">
+        <label className="block border-b border-slate-200 px-5 py-3 dark:border-slate-800">
+          <span className="mb-1 block text-xs font-medium text-slate-700 dark:text-slate-300">
+            Your name (shown on your changes)
+          </span>
+          <input
+            className="input"
+            value={actor}
+            onChange={(e) => setActor(e.target.value)}
+            placeholder="Anonymous"
+            maxLength={40}
+          />
+        </label>
+
+        <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4">
           {state === 'error' && (
             <p className="mb-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-800 dark:bg-rose-400/10 dark:text-rose-200">
               Couldn&apos;t load activity.{' '}
@@ -147,7 +164,7 @@ export default function ActivityDrawer({ open, onClose }) {
                   className={`absolute -left-[25px] top-1.5 h-2.5 w-2.5 rounded-full ring-4 ring-white dark:ring-slate-900 ${ACTION_STYLE[entry.action]}`}
                   aria-hidden
                 />
-                <p className="text-sm leading-snug">{describe(entry)}</p>
+                <p className="text-sm leading-snug">{describe(entry, labelOf)}</p>
                 <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                   {entry.actor} · {timeFormat.format(new Date(entry.createdAt))}
                 </p>

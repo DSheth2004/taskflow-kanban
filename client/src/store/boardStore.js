@@ -3,6 +3,7 @@ import toast from 'react-hot-toast';
 import { api } from '../api/client';
 import { orderBetween, sortedColumn } from '../lib/ordering';
 import { createMutationQueue } from '../lib/mutationQueue';
+import { createWorkflow } from '../lib/workflow';
 
 const CONTENT_FIELDS = ['title', 'description', 'priority'];
 
@@ -36,6 +37,7 @@ export const createBoardStore = () => {
     confirmed: {},
     pendingMoves: {},
     pendingEdits: {},
+    workflow: null, // states + transitions from the server; the board's columns
     status: 'idle', // idle | loading | ready | error
     error: null,
     activityVersion: 0, // bumped after each saved write so the activity drawer refreshes
@@ -45,8 +47,16 @@ export const createBoardStore = () => {
     async loadBoard() {
       set({ status: 'loading', error: null });
       try {
-        const map = byId(await api.listTasks());
-        set({ tasks: map, confirmed: map, pendingMoves: {}, pendingEdits: {}, status: 'ready' });
+        const [workflow, list] = await Promise.all([api.getWorkflow(), api.listTasks()]);
+        const map = byId(list);
+        set({
+          workflow: createWorkflow(workflow),
+          tasks: map,
+          confirmed: map,
+          pendingMoves: {},
+          pendingEdits: {},
+          status: 'ready',
+        });
       } catch (err) {
         set({ status: 'error', error: err.message });
       }
@@ -87,9 +97,15 @@ export const createBoardStore = () => {
 
     /** Moves a card so it ends up at `toIndex` among the other cards of `toColumnId`. */
     moveTask(id, toColumnId, toIndex) {
-      const { tasks } = get();
+      const { tasks, workflow } = get();
       const task = tasks[id];
       if (!task) return;
+
+      // The card's current state decides where it may go (rules come from the server).
+      if (!workflow.stateOf(task.columnId)?.canMoveTo(toColumnId)) {
+        toast.error(workflow.whyNot(task.columnId, toColumnId));
+        return;
+      }
 
       const others = sortedColumn(tasks, toColumnId).filter((t) => t.id !== id);
       if (task.columnId === toColumnId) {
@@ -118,27 +134,56 @@ export const createBoardStore = () => {
       queue.enqueue(`move:${id}`, () => get()._sendMove(id));
     },
 
+    /** Moves a card to the bottom of `toColumnId`, or of its state's first transition. */
+    advanceTask(id, toColumnId) {
+      const { tasks, workflow } = get();
+      const target = toColumnId ?? workflow.stateOf(tasks[id]?.columnId)?.transitions[0];
+      if (target) get().moveTask(id, target, sortedColumn(tasks, target).length);
+    },
+
     async _sendMove(id) {
-      const { tasks, confirmed, pendingMoves } = get();
+      const { tasks, confirmed, pendingMoves, workflow } = get();
       const n = pendingMoves[id];
       const task = tasks[id];
       if (n == null || !task) return; // already settled by a rollback/refresh, or deleted
 
-      // Neighbours are the closest cards that are not waiting to sync themselves, because
-      // only those are guaranteed to be where the server thinks they are. Cards with a
-      // pending move get placed relative to this one when their own job runs.
-      const column = sortedColumn(tasks, task.columnId);
-      const i = column.findIndex((t) => t.id === id);
-      const settled = (t) => pendingMoves[t.id] == null;
-      const prev = column.slice(0, i).findLast(settled);
-      const next = column.slice(i + 1).find(settled);
-
       try {
+        // Two quick drags (e.g. To Do -> In Progress -> Done) are coalesced into one job,
+        // but the server only accepts one transition at a time, so replay every
+        // intermediate state first (bottom of that column), then send the final position.
+        const fromId = confirmed[id].columnId;
+        const path = workflow.pathTo(fromId, task.columnId);
+        if (!path) {
+          throw Object.assign(new Error(workflow.whyNot(fromId, task.columnId)), { status: 422 });
+        }
+        let version = confirmed[id].version;
+        for (const step of path.slice(0, -1)) {
+          const { task: stepSaved } = await api.moveTask(id, {
+            toColumnId: step,
+            prevId: null,
+            nextId: null,
+            version,
+          });
+          version = stepSaved.version;
+          set((s) => ({ confirmed: { ...s.confirmed, [id]: stepSaved } }));
+        }
+
+        // Neighbours are the closest cards that are not waiting to sync themselves, because
+        // only those are guaranteed to be where the server thinks they are. Cards with a
+        // pending move get placed relative to this one when their own job runs.
+        const latest = get();
+        if (!latest.tasks[id]) return; // deleted while the intermediate steps were saving
+        const column = sortedColumn(latest.tasks, task.columnId);
+        const i = column.findIndex((t) => t.id === id);
+        const settled = (t) => latest.pendingMoves[t.id] == null;
+        const prev = column.slice(0, i).findLast(settled);
+        const next = column.slice(i + 1).find(settled);
+
         const { task: saved, rebalanced } = await api.moveTask(id, {
           toColumnId: task.columnId,
           prevId: prev?.id ?? null,
           nextId: next?.id ?? null,
-          version: confirmed[id].version,
+          version,
         });
         set((s) => {
           // If the user moved the card again while this request was in flight, keep the
