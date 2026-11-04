@@ -5,8 +5,6 @@ import { useBoardStore } from '../store/boardStore';
 import PriorityBadge from './PriorityBadge';
 import { PencilIcon } from './Icons';
 
-// memo + a stable `task` object reference means only the card that changed re-renders;
-// the store replaces just that one entry in the tasks map on each update.
 function TaskCard({ task, onEdit }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
@@ -20,8 +18,7 @@ function TaskCard({ task, onEdit }) {
     <li
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      // select-none + no callout: a long-press starts a drag on touch screens instead of
-      // selecting text or opening the browser's context menu.
+
       className={`select-none [-webkit-touch-callout:none] ${isDragging ? 'opacity-40' : ''}`}
       {...attributes}
       {...listeners}
@@ -46,9 +43,8 @@ export function TaskCardView({ task, saving = false, overlay = false, onEdit }) 
         <h3 className="flex-1 text-sm font-medium leading-snug break-words">{task.title}</h3>
         {onEdit && (
           <button
-            // Hidden until hover on mouse devices; always visible on touch (no hover there).
             className="-m-1.5 rounded-md p-1.5 text-slate-500 opacity-0 transition hover:bg-slate-100 focus-visible:opacity-100 group-hover:opacity-100 dark:text-slate-400 dark:hover:bg-slate-700 [@media(hover:none)]:opacity-100"
-            // Keep the drag sensors from treating a tap on this button as a drag start.
+
             onMouseDown={(e) => e.stopPropagation()}
             onTouchStart={(e) => e.stopPropagation()}
             onKeyDown={(e) => e.stopPropagation()}
@@ -67,10 +63,18 @@ export function TaskCardView({ task, saving = false, overlay = false, onEdit }) 
           {task.description}
         </p>
       )}
-      <div className="mt-2.5 flex items-center justify-between">
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
         <PriorityBadge priority={task.priority} />
+        {task.tags?.map((tag) => (
+          <span
+            key={tag}
+            className="truncate rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-700 dark:bg-slate-700 dark:text-slate-200"
+          >
+            #{tag}
+          </span>
+        ))}
         {saving && (
-          <span className="flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
+          <span className="ml-auto flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-500" />
             Saving
           </span>

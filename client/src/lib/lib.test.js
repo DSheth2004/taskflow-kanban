@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { orderBetween, sortedColumn } from './ordering';
 import { createMutationQueue } from './mutationQueue';
 import { createWorkflow } from './workflow';
+import { parseTags } from '../constants';
 
-// What GET /api/workflow returns for the default To Do -> In Progress -> Done board.
 const WORKFLOW = {
   states: [
     {
@@ -70,8 +70,8 @@ describe('mutation queue', () => {
     const q = createMutationQueue();
     let runs = 0;
     const job = () => Promise.resolve(runs++);
-    expect(q.enqueue('k', job)).not.toBeNull(); // starts on next tick
-    expect(q.enqueue('k', job)).toBeNull(); // first one hasn't started yet -> coalesced
+    expect(q.enqueue('k', job)).not.toBeNull();
+    expect(q.enqueue('k', job)).toBeNull();
     await q.whenIdle();
     expect(q.enqueue('k', job)).not.toBeNull();
     await q.whenIdle();
@@ -112,5 +112,18 @@ describe('workflow states', () => {
     expect(wf.labelOf('in_progress')).toBe('In Progress');
     expect(wf.labelOf('archived')).toBe('archived');
     expect(stateOf('archived')).toBeNull();
+  });
+});
+
+describe('parseTags', () => {
+  it('splits on commas, trims, lower-cases, de-duplicates and caps at 5', () => {
+    expect(parseTags(' Frontend, bug ,,BUG, a, b, c, d')).toEqual([
+      'frontend',
+      'bug',
+      'a',
+      'b',
+      'c',
+    ]);
+    expect(parseTags('')).toEqual([]);
   });
 });

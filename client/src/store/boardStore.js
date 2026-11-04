@@ -5,7 +5,9 @@ import { orderBetween, sortedColumn } from '../lib/ordering';
 import { createMutationQueue } from '../lib/mutationQueue';
 import { createWorkflow } from '../lib/workflow';
 
-const CONTENT_FIELDS = ['title', 'description', 'priority'];
+const CONTENT_FIELDS = ['title', 'description', 'priority', 'tags'];
+
+const sameValue = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
 const byId = (list) => Object.fromEntries(list.map((t) => [t.id, t]));
 const omit = (obj, key) => {
@@ -20,15 +22,8 @@ function reportError(err, action) {
   else toast.error(`${action} failed: ${err.message}. Changes undone.`);
 }
 
-let seq = 0; // ids local edits so a late response can tell whether it is still the newest
+let seq = 0;
 
-/**
- * State shape
- *   tasks        id -> task as shown on screen (includes optimistic changes)
- *   confirmed    id -> task as last acknowledged by the server (rollback target + version)
- *   pendingMoves id -> seq of the newest unacknowledged move of that card
- *   pendingEdits id -> seq of the newest unacknowledged content edit of that card
- */
 export const createBoardStore = () => {
   const queue = createMutationQueue();
 
@@ -37,10 +32,10 @@ export const createBoardStore = () => {
     confirmed: {},
     pendingMoves: {},
     pendingEdits: {},
-    workflow: null, // states + transitions from the server; the board's columns
-    status: 'idle', // idle | loading | ready | error
+    workflow: null,
+    status: 'idle',
     error: null,
-    activityVersion: 0, // bumped after each saved write so the activity drawer refreshes
+    activityVersion: 0,
 
     whenIdle: () => queue.whenIdle(),
 
@@ -62,16 +57,13 @@ export const createBoardStore = () => {
       }
     },
 
-    // Reloads from the server after a 409 or a rebalance. It runs through the queue, so
-    // every request sent before it has settled; anything still pending belongs to a job
-    // queued after it, and those local changes are kept on top of the fresh data.
     refresh() {
       queue.enqueue('refresh', async () => {
         let list;
         try {
           list = await api.listTasks();
         } catch {
-          return; // keep what we have; the next successful write or reload will fix it
+          return;
         }
         set((s) => {
           const confirmed = byId(list);
@@ -93,15 +85,11 @@ export const createBoardStore = () => {
       });
     },
 
-    // ---- moves (optimistic) -------------------------------------------------------
-
-    /** Moves a card so it ends up at `toIndex` among the other cards of `toColumnId`. */
     moveTask(id, toColumnId, toIndex) {
       const { tasks, workflow } = get();
       const task = tasks[id];
       if (!task) return;
 
-      // The card's current state decides where it may go (rules come from the server).
       if (!workflow.stateOf(task.columnId)?.canMoveTo(toColumnId)) {
         toast.error(workflow.whyNot(task.columnId, toColumnId));
         return;
@@ -110,12 +98,11 @@ export const createBoardStore = () => {
       const others = sortedColumn(tasks, toColumnId).filter((t) => t.id !== id);
       if (task.columnId === toColumnId) {
         const currentIndex = sortedColumn(tasks, toColumnId).findIndex((t) => t.id === id);
-        if (currentIndex === toIndex) return; // dropped where it started
+        if (currentIndex === toIndex) return;
       }
       const prev = others[toIndex - 1];
       const next = others[toIndex];
 
-      // 1. Update the screen immediately with a local guess at the orderIndex.
       const n = ++seq;
       set((s) => ({
         tasks: {
@@ -129,12 +116,9 @@ export const createBoardStore = () => {
         pendingMoves: { ...s.pendingMoves, [id]: n },
       }));
 
-      // 2. Queue the server write. If this card already has a move waiting, that job will
-      //    pick up this newer position when it runs, so no second request is needed.
       queue.enqueue(`move:${id}`, () => get()._sendMove(id));
     },
 
-    /** Moves a card to the bottom of `toColumnId`, or of its state's first transition. */
     advanceTask(id, toColumnId) {
       const { tasks, workflow } = get();
       const target = toColumnId ?? workflow.stateOf(tasks[id]?.columnId)?.transitions[0];
@@ -145,12 +129,9 @@ export const createBoardStore = () => {
       const { tasks, confirmed, pendingMoves, workflow } = get();
       const n = pendingMoves[id];
       const task = tasks[id];
-      if (n == null || !task) return; // already settled by a rollback/refresh, or deleted
+      if (n == null || !task) return;
 
       try {
-        // Two quick drags (e.g. To Do -> In Progress -> Done) are coalesced into one job,
-        // but the server only accepts one transition at a time, so replay every
-        // intermediate state first (bottom of that column), then send the final position.
         const fromId = confirmed[id].columnId;
         const path = workflow.pathTo(fromId, task.columnId);
         if (!path) {
@@ -168,11 +149,8 @@ export const createBoardStore = () => {
           set((s) => ({ confirmed: { ...s.confirmed, [id]: stepSaved } }));
         }
 
-        // Neighbours are the closest cards that are not waiting to sync themselves, because
-        // only those are guaranteed to be where the server thinks they are. Cards with a
-        // pending move get placed relative to this one when their own job runs.
         const latest = get();
-        if (!latest.tasks[id]) return; // deleted while the intermediate steps were saving
+        if (!latest.tasks[id]) return;
         const column = sortedColumn(latest.tasks, task.columnId);
         const i = column.findIndex((t) => t.id === id);
         const settled = (t) => latest.pendingMoves[t.id] == null;
@@ -186,8 +164,6 @@ export const createBoardStore = () => {
           version,
         });
         set((s) => {
-          // If the user moved the card again while this request was in flight, keep the
-          // newer optimistic position on screen; its own job will confirm it.
           const isLatest = s.pendingMoves[id] === n && s.tasks[id];
           return {
             confirmed: { ...s.confirmed, [id]: saved },
@@ -198,11 +174,9 @@ export const createBoardStore = () => {
             activityVersion: s.activityVersion + 1,
           };
         });
-        // The server renumbered the column, so our other orderIndex values are stale.
+
         if (rebalanced) get().refresh();
       } catch (err) {
-        // Roll back to the last position the server confirmed. Any newer move of this
-        // card that is still queued is dropped too (its job sees no pending entry).
         set((s) => {
           const base = s.confirmed[id];
           return {
@@ -220,8 +194,6 @@ export const createBoardStore = () => {
         if (err.status === 409 || err.status === 404) get().refresh();
       }
     },
-
-    // ---- content edits (optimistic) ----------------------------------------------
 
     updateTask(id, changes) {
       const task = get().tasks[id];
@@ -241,7 +213,7 @@ export const createBoardStore = () => {
       if (n == null || !task) return;
 
       const changes = Object.fromEntries(
-        CONTENT_FIELDS.filter((k) => task[k] !== confirmed[id][k]).map((k) => [k, task[k]])
+        CONTENT_FIELDS.filter((k) => !sameValue(task[k], confirmed[id][k])).map((k) => [k, task[k]])
       );
       if (Object.keys(changes).length === 0) {
         set((s) => ({ pendingEdits: omit(s.pendingEdits, id) }));
@@ -277,8 +249,6 @@ export const createBoardStore = () => {
       }
     },
 
-    // ---- delete (optimistic) -----------------------------------------------------
-
     deleteTask(id) {
       if (!get().tasks[id]) return;
       set((s) => ({
@@ -291,7 +261,6 @@ export const createBoardStore = () => {
           await api.deleteTask(id);
         } catch (err) {
           if (err.status !== 404) {
-            // Put the card back exactly as the server last had it.
             set((s) => (s.confirmed[id] ? { tasks: { ...s.tasks, [id]: s.confirmed[id] } } : {}));
             reportError(err, 'Delete');
             return;
@@ -301,11 +270,6 @@ export const createBoardStore = () => {
       });
     },
 
-    // ---- create (waits for the server) -------------------------------------------
-
-    // Not optimistic on purpose: a card with a temporary id could be dragged before the
-    // real id exists, and every later request would need translating. Creating is rare
-    // and the modal shows a spinner, so waiting ~100ms is the simpler trade-off.
     async createTask(data) {
       const saved = await queue.enqueue(null, () => api.createTask(data));
       set((s) => ({
