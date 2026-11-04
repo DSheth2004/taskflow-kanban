@@ -3,8 +3,14 @@
 @tailwind utilities;
 
 @layer base {
+  /* The board scrolls inside itself; the page should never shift sideways on phones. */
+  html,
+  body {
+    overflow-x: hidden;
+  }
   body {
     @apply bg-slate-100 text-slate-900 antialiased dark:bg-slate-950 dark:text-slate-100;
+    -webkit-tap-highlight-color: transparent;
   }
 }
 

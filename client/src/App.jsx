@@ -10,7 +10,7 @@ export default function App() {
   const loadBoard = useBoardStore((s) => s.loadBoard);
   const status = useBoardStore((s) => s.status);
   const error = useBoardStore((s) => s.error);
-  // null = closed, { columnId } = create, { taskId } = edit
+  // null = closed, {} = create, { taskId } = edit
   const [modal, setModal] = useState(null);
   const [activityOpen, setActivityOpen] = useState(false);
 
@@ -19,22 +19,21 @@ export default function App() {
   }, [loadBoard]);
 
   // Stable callbacks so memoised task cards don't re-render when App does.
-  const addTask = useCallback((columnId) => setModal({ columnId }), []);
+  const addTask = useCallback(() => setModal({}), []);
   const editTask = useCallback((taskId) => setModal({ taskId }), []);
   const closeModal = useCallback(() => setModal(null), []);
   const closeActivity = useCallback(() => setActivityOpen(false), []);
 
   return (
-    <div className="flex min-h-screen flex-col">
-      <Header
-        onNewTask={() => setModal({ columnId: 'todo' })}
-        onOpenActivity={() => setActivityOpen(true)}
-      />
+    // The app fills exactly one screen (dvh accounts for mobile browser toolbars); columns
+    // scroll inside themselves, so the layout is the same on phones, tablets and desktops.
+    <div className="flex h-dvh flex-col">
+      <Header onNewTask={addTask} onOpenActivity={() => setActivityOpen(true)} />
 
-      <main className="flex-1 px-4 pb-8 sm:px-6">
+      <main className="min-h-0 flex-1 pt-3 sm:pt-4">
         {status === 'loading' && <BoardSkeleton />}
         {status === 'error' && (
-          <div className="mx-auto mt-16 max-w-md rounded-xl border border-rose-200 bg-white p-6 text-center dark:border-rose-400/30 dark:bg-slate-900">
+          <div className="mx-4 mt-16 max-w-md rounded-xl sm:mx-auto border border-rose-200 bg-white p-6 text-center dark:border-rose-400/30 dark:bg-slate-900">
             <p className="font-medium">Couldn&apos;t load the board</p>
             <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">{error}</p>
             <button className="btn-primary mt-4" onClick={loadBoard}>
@@ -49,7 +48,8 @@ export default function App() {
       <ActivityDrawer open={activityOpen} onClose={closeActivity} />
 
       <Toaster
-        position="bottom-right"
+        position="bottom-center"
+        containerStyle={{ bottom: 'max(1rem, env(safe-area-inset-bottom))' }}
         toastOptions={{
           className:
             '!bg-white !text-slate-900 dark:!bg-slate-800 dark:!text-slate-100 !text-sm !shadow-lg',
@@ -61,9 +61,16 @@ export default function App() {
 
 function BoardSkeleton() {
   return (
-    <div className="grid gap-4 md:grid-cols-3" aria-busy="true" aria-label="Loading board">
+    <div
+      className="flex h-full gap-3 overflow-hidden px-4 pb-4 sm:gap-4 sm:px-6"
+      aria-busy="true"
+      aria-label="Loading board"
+    >
       {[0, 1, 2].map((i) => (
-        <div key={i} className="h-96 animate-pulse rounded-2xl bg-slate-200/70 dark:bg-slate-900" />
+        <div
+          key={i}
+          className="h-full w-[86vw] max-w-sm shrink-0 animate-pulse rounded-2xl bg-slate-200/70 md:w-0 md:max-w-none md:flex-1 dark:bg-slate-900"
+        />
       ))}
     </div>
   );
