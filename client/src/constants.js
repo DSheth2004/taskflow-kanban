@@ -1,10 +1,20 @@
-export const COLUMNS = [
-  { id: 'todo', title: 'To Do' },
-  { id: 'in_progress', title: 'In Progress' },
-  { id: 'done', title: 'Done' },
-];
+// Columns are not listed here: they come from the server's workflow (GET /api/workflow).
 
-export const COLUMN_TITLES = Object.fromEntries(COLUMNS.map((c) => [c.id, c.title]));
+// Accent colours a workflow state can name with its `color` token. Written out in full so
+// Tailwind keeps the classes; a state with an unknown token falls back to slate.
+export const STATE_ACCENTS = {
+  slate: 'bg-slate-400',
+  gray: 'bg-gray-400',
+  indigo: 'bg-indigo-500',
+  blue: 'bg-blue-500',
+  sky: 'bg-sky-500',
+  violet: 'bg-violet-500',
+  amber: 'bg-amber-500',
+  orange: 'bg-orange-500',
+  rose: 'bg-rose-500',
+  teal: 'bg-teal-500',
+  emerald: 'bg-emerald-500',
+};
 
 export const PRIORITIES = ['Low', 'Medium', 'High'];
 

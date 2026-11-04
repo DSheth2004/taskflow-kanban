@@ -20,7 +20,9 @@ function TaskCard({ task, onEdit }) {
     <li
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={isDragging ? 'opacity-40' : ''}
+      // select-none + no callout: a long-press starts a drag on touch screens instead of
+      // selecting text or opening the browser's context menu.
+      className={`select-none [-webkit-touch-callout:none] ${isDragging ? 'opacity-40' : ''}`}
       {...attributes}
       {...listeners}
       aria-roledescription="draggable task"
@@ -36,7 +38,7 @@ export default memo(TaskCard);
 export function TaskCardView({ task, saving = false, overlay = false, onEdit }) {
   return (
     <article
-      className={`group cursor-grab rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition hover:border-slate-300 active:cursor-grabbing dark:border-slate-700/80 dark:bg-slate-800 dark:hover:border-slate-600 ${
+      className={`group cursor-grab rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition hover:border-slate-300 hover:shadow active:cursor-grabbing dark:border-slate-700/80 dark:bg-slate-800 dark:hover:border-slate-600 ${
         overlay ? 'rotate-1 shadow-xl ring-2 ring-indigo-500/50' : ''
       }`}
     >
@@ -44,8 +46,12 @@ export function TaskCardView({ task, saving = false, overlay = false, onEdit }) 
         <h3 className="flex-1 text-sm font-medium leading-snug break-words">{task.title}</h3>
         {onEdit && (
           <button
-            className="-m-1 rounded p-1 text-slate-500 opacity-0 transition hover:bg-slate-100 focus-visible:opacity-100 group-hover:opacity-100 dark:text-slate-400 dark:hover:bg-slate-700"
-            onPointerDown={(e) => e.stopPropagation()}
+            // Hidden until hover on mouse devices; always visible on touch (no hover there).
+            className="-m-1.5 rounded-md p-1.5 text-slate-500 opacity-0 transition hover:bg-slate-100 focus-visible:opacity-100 group-hover:opacity-100 dark:text-slate-400 dark:hover:bg-slate-700 [@media(hover:none)]:opacity-100"
+            // Keep the drag sensors from treating a tap on this button as a drag start.
+            onMouseDown={(e) => e.stopPropagation()}
+            onTouchStart={(e) => e.stopPropagation()}
+            onKeyDown={(e) => e.stopPropagation()}
             onClick={(e) => {
               e.stopPropagation();
               onEdit(task.id);

@@ -1,6 +1,39 @@
 import { describe, expect, it } from 'vitest';
 import { orderBetween, sortedColumn } from './ordering';
 import { createMutationQueue } from './mutationQueue';
+import { createWorkflow } from './workflow';
+
+// What GET /api/workflow returns for the default To Do -> In Progress -> Done board.
+const WORKFLOW = {
+  states: [
+    {
+      id: 'todo',
+      label: 'To Do',
+      color: 'slate',
+      isInitial: true,
+      isFinal: false,
+      transitions: ['in_progress'],
+    },
+    {
+      id: 'in_progress',
+      label: 'In Progress',
+      color: 'indigo',
+      isInitial: false,
+      isFinal: false,
+      transitions: ['done'],
+    },
+    {
+      id: 'done',
+      label: 'Done',
+      color: 'emerald',
+      isInitial: false,
+      isFinal: true,
+      transitions: [],
+    },
+  ],
+};
+const wf = createWorkflow(WORKFLOW);
+const stateOf = wf.stateOf;
 
 describe('orderBetween', () => {
   it('handles empty, top, bottom and middle', () => {
@@ -51,5 +84,33 @@ describe('mutation queue', () => {
     const ok = q.enqueue(null, () => Promise.resolve('done'));
     await expect(failed).rejects.toThrow('x');
     await expect(ok).resolves.toBe('done');
+  });
+});
+
+describe('workflow states', () => {
+  it('only allows staying put or moving one step forward', () => {
+    expect(stateOf('todo').canMoveTo('todo')).toBe(true);
+    expect(stateOf('todo').canMoveTo('in_progress')).toBe(true);
+    expect(stateOf('todo').canMoveTo('done')).toBe(false);
+    expect(stateOf('in_progress').canMoveTo('todo')).toBe(false);
+    expect(stateOf('in_progress').canMoveTo('done')).toBe(true);
+    expect(stateOf('done').canMoveTo('in_progress')).toBe(false);
+  });
+
+  it('knows the initial and final states', () => {
+    expect(wf.initial).toBe(stateOf('todo'));
+    expect(stateOf('done').isFinal).toBe(true);
+  });
+
+  it('lists the steps between two states, or null when going backwards', () => {
+    expect(wf.pathTo('todo', 'done')).toEqual(['in_progress', 'done']);
+    expect(wf.pathTo('in_progress', 'in_progress')).toEqual([]);
+    expect(wf.pathTo('done', 'todo')).toBeNull();
+  });
+
+  it('keeps showing ids of states that no longer exist (old activity entries)', () => {
+    expect(wf.labelOf('in_progress')).toBe('In Progress');
+    expect(wf.labelOf('archived')).toBe('archived');
+    expect(stateOf('archived')).toBeNull();
   });
 });

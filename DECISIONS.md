@@ -71,6 +71,55 @@ I used Claude (via Claude Code) to scaffold the project, review the concurrency 
 
 _(Add anything else you hit while building, such as deployment issues and dnd-kit quirks. Real mistakes are what this section is graded on.)_
 
+## Extra: workflow rules with the State pattern
+
+**Rule (current configuration):** a task moves **To Do → In Progress → Done**, one step at a time. It can't go backwards or skip a step, and Done is final. Reordering inside a column is always allowed. New tasks start in the initial state.
+
+**Goal:** you can add, remove or reorder states by changing only the backend. The UI renders whatever the server describes.
+
+### Backend: one class per state (`server/src/workflow/`)
+
+| File                                                        | Role                                                                                                                                                                                                                                                                                                                     |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `WorkflowState.js`                                          | Base class. A state has an `id`, `label`, `color` token, `isInitial` and `transitions` (ids it may move to). It answers `canMoveTo(target)`, and `isFinal` is true when `transitions` is empty.                                                                                                                          |
+| `states/TodoState.js`, `InProgressState.js`, `DoneState.js` | Concrete states. Each one is about five lines declaring its own rules.                                                                                                                                                                                                                                                   |
+| `Workflow.js`                                               | The context. It holds the states in column order and checks the configuration at startup: unique ids, exactly one initial state, and no transitions to unknown states. It also answers questions that span several states: `pathTo(from, to)` (shortest path, found with a breadth-first search) and `whyNot(from, to)`. |
+| `index.js`                                                  | **The single place the board is configured:** `new Workflow([new TodoState(), new InProgressState(), new DoneState()])`.                                                                                                                                                                                                 |
+
+The rest of the backend asks the workflow instead of naming states:
+
+- **Validation:** the Mongoose enum and the zod schema are built from `workflow.ids`.
+- **Moves:** `moveTask` asks `workflow.stateOf(current.columnId).canMoveTo(toColumnId)` and returns **422 INVALID_TRANSITION** if not. 422 means "well-formed but not allowed", unlike 409, which means "your copy is stale".
+- **Creating:** `createTask` only accepts the initial state.
+- **Publishing:** `GET /api/workflow` sends the whole definition to the client.
+
+**Adding a "Review" step between In Progress and Done:**
+
+1. Create `states/ReviewState.js` with `id = 'review'`, `label = 'Review'`, `color = 'amber'` and `transitions = ['done', 'in_progress']` (approve, or send back).
+2. Change `InProgressState.transitions` to `['review']`.
+3. Add `new ReviewState()` to the list in `index.js`, after `InProgressState`.
+
+That's all. `server/tests/workflow.test.js` builds exactly this four-state workflow and checks paths, transitions and error messages.
+
+**Removing a state:** take it out of the list, and repoint any `transitions` that referenced it. The startup check refuses to boot if one is left dangling. First move any tasks still in that state (`db.tasks.updateMany({ columnId: 'review' }, { $set: { columnId: 'done' } })`), because the Task enum won't accept the old id any more. Activity entries deliberately have **no** enum on `from`/`to`, so history stays readable, and the UI shows the raw id for states that no longer exist.
+
+### Frontend: no state names anywhere (`client/src/lib/workflow.js`)
+
+The client loads `/api/workflow` together with the tasks, and `createWorkflow(json)` turns it into an object with `states`, `stateOf`, `labelOf`, `pathTo` and `whyNot`. Everything on screen is derived from it:
+
+- **Columns:** order, headings, and the accent colour (the server's `color` token maps to a fixed palette in `constants.js`; unknown tokens fall back to slate).
+- **Phone tab strip:** one tab per state.
+- **Locked columns while dragging:** from `canMoveTo`.
+- **Create button:** only on the initial state's column.
+- **Edit dialog:** one **"Move to X →"** button per allowed transition, so branching workflows like Review → Done / In Progress just work.
+- **Activity labels:** from `labelOf`.
+
+The desktop layout fits any number of columns, which share the width with a minimum size and scroll sideways if there are many. `client/src/store/boardStore.test.js` loads a four-state workflow from a mocked server and checks the new rules are enforced. No client code changed for that.
+
+**Why the State pattern instead of `if` chains:** the move service, store and UI never branch on a column name; they ask the current state. Rules for a state live in that state's class, and adding one is additive. A plain transition table (`{ todo: ['in_progress'] }`) would hold the same data. The classes give each state a home for its own behaviour (initial or final, label, colour, and any future hooks like "require an assignee before entering Review"), and they map directly onto the pattern.
+
+**Coalescing across states:** two fast legal drags can be folded into one queued job, for example To Do → In Progress → Done (see section 2, point 3). Sent as one jump, the server would reject it. So `_sendMove` uses `pathTo()` to replay each intermediate state first, then sends the final position. Each step is a real, legal transition and is recorded in the activity log.
+
 ## 4. At scale: 50,000 tasks and 100 concurrent users
 
 **What breaks first**

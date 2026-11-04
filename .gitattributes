@@ -1,0 +1,2 @@
+# Prettier writes LF; keep checkouts on LF too so Windows autocrlf doesn't flag every file.
+* text=auto eol=lf

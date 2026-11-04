@@ -1,12 +1,14 @@
 import mongoose from 'mongoose';
-import { COLUMN_IDS, PRIORITIES } from '../constants.js';
+import { PRIORITIES } from '../constants.js';
+import { workflow } from '../workflow/index.js';
 
 const taskSchema = new mongoose.Schema(
   {
     title: { type: String, required: true, trim: true, maxlength: 120 },
     description: { type: String, default: '', maxlength: 2000 },
     priority: { type: String, enum: PRIORITIES, default: 'Medium' },
-    columnId: { type: String, enum: COLUMN_IDS, required: true },
+    // The workflow state the task is in; one board column per state.
+    columnId: { type: String, enum: workflow.ids, required: true },
     orderIndex: { type: Number, required: true },
     // Bumped on every write. Writes are conditional on the version the client last saw,
     // so a stale request matches zero documents and becomes a 409 instead of a silent overwrite.

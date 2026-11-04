@@ -41,6 +41,7 @@ async function request(path, { method = 'GET', body } = {}) {
 }
 
 export const api = {
+  getWorkflow: () => request('/workflow'),
   listTasks: () => request('/tasks'),
   createTask: (task) => request('/tasks', { method: 'POST', body: task }),
   updateTask: (id, changes) => request(`/tasks/${id}`, { method: 'PATCH', body: changes }),

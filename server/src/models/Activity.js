@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import { ACTIONS, COLUMN_IDS } from '../constants.js';
+import { ACTIONS } from '../constants.js';
 
 const activitySchema = new mongoose.Schema(
   {
@@ -7,8 +7,9 @@ const activitySchema = new mongoose.Schema(
     // Copied rather than referenced so entries still read correctly after the task is deleted.
     taskTitle: { type: String, required: true },
     action: { type: String, enum: ACTIONS, required: true },
-    from: { type: String, enum: [...COLUMN_IDS, null], default: null },
-    to: { type: String, enum: [...COLUMN_IDS, null], default: null },
+    // Plain strings (no enum) so old entries stay valid if a workflow state is removed.
+    from: { type: String, default: null },
+    to: { type: String, default: null },
     changes: { type: [String], default: undefined }, // field names, for 'updated'
     actor: { type: String, default: 'Anonymous', maxlength: 40 },
   },

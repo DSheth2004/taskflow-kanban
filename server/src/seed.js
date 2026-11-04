@@ -3,6 +3,7 @@ import { connectDB, disconnectDB } from './db.js';
 import { Task } from './models/Task.js';
 import { Activity } from './models/Activity.js';
 import { STEP } from './lib/ordering.js';
+import { workflow } from './workflow/index.js';
 
 const SEED = {
   todo: [
@@ -29,6 +30,9 @@ const SEED = {
 };
 
 async function seed() {
+  for (const columnId of Object.keys(SEED)) {
+    if (!workflow.has(columnId)) throw new Error(`Seed data uses unknown state "${columnId}"`);
+  }
   await connectDB();
   await Promise.all([Task.deleteMany({}), Activity.deleteMany({})]);
 

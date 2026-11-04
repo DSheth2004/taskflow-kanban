@@ -28,6 +28,9 @@ beforeEach(async () => {
 
 const create = (body) => request(app).post('/api/tasks').send(body);
 const move = (id, body) => request(app).patch(`/api/tasks/${id}/move`).send(body);
+// Inserts tasks straight into any column (bypassing the workflow) to set up a scenario.
+const place = (...rows) =>
+  Task.insertMany(rows.map(([title, columnId, orderIndex]) => ({ title, columnId, orderIndex })));
 const columnTitles = async (columnId) =>
   (await Task.find({ columnId }).sort({ orderIndex: 1 })).map((t) => t.title);
 
@@ -99,14 +102,18 @@ describe('task CRUD', () => {
 
 describe('moving tasks', () => {
   it('places a card between its neighbours with a single-document write', async () => {
-    const a = (await create({ title: 'A', columnId: 'done' })).body;
-    const b = (await create({ title: 'B', columnId: 'done' })).body;
+    const [a, b] = await place(['A', 'in_progress', 1000], ['B', 'in_progress', 2000]);
     const x = (await create({ title: 'X' })).body;
 
-    const res = await move(x.id, { toColumnId: 'done', prevId: a.id, nextId: b.id, version: 0 });
+    const res = await move(x.id, {
+      toColumnId: 'in_progress',
+      prevId: a.id,
+      nextId: b.id,
+      version: 0,
+    });
     expect(res.status).toBe(200);
-    expect(res.body.task).toMatchObject({ columnId: 'done', orderIndex: 1500, version: 1 });
-    expect(await columnTitles('done')).toEqual(['A', 'X', 'B']);
+    expect(res.body.task).toMatchObject({ columnId: 'in_progress', orderIndex: 1500, version: 1 });
+    expect(await columnTitles('in_progress')).toEqual(['A', 'X', 'B']);
 
     // Neighbours were not rewritten.
     const untouched = await Task.find({ _id: { $in: [a.id, b.id] } });
@@ -126,58 +133,59 @@ describe('moving tasks', () => {
   });
 
   it('never ties with a card the client did not know about', async () => {
-    const a = (await create({ title: 'A', columnId: 'done' })).body;
-    await create({ title: 'Unseen', columnId: 'done' }); // client thinks A is last
+    // The client thinks A is the last card in progress.
+    const [a] = await place(['A', 'in_progress', 1000], ['Unseen', 'in_progress', 2000]);
     const x = (await create({ title: 'X' })).body;
 
-    await move(x.id, { toColumnId: 'done', prevId: a.id, nextId: null, version: 0 });
-    expect(await columnTitles('done')).toEqual(['A', 'X', 'Unseen']);
+    await move(x.id, { toColumnId: 'in_progress', prevId: a.id, nextId: null, version: 0 });
+    expect(await columnTitles('in_progress')).toEqual(['A', 'X', 'Unseen']);
   });
 
   it('returns 409 when a named neighbour is no longer in the target column', async () => {
-    const a = (await create({ title: 'A', columnId: 'done' })).body;
+    const [a] = await place(['A', 'in_progress', 1000]);
     const x = (await create({ title: 'X' })).body;
-    await move(a.id, { toColumnId: 'in_progress', version: 0 });
+    await move(a.id, { toColumnId: 'done', version: 0 });
 
-    const res = await move(x.id, { toColumnId: 'done', prevId: a.id, version: 0 });
+    const res = await move(x.id, { toColumnId: 'in_progress', prevId: a.id, version: 0 });
     expect(res.status).toBe(409);
   });
 
   it('lets exactly one of two concurrent moves with the same version win', async () => {
+    const [p, q] = await place(['P', 'in_progress', 1000], ['Q', 'in_progress', 2000]);
     const x = (await create({ title: 'X' })).body;
     const results = await Promise.all([
-      move(x.id, { toColumnId: 'in_progress', version: 0 }),
-      move(x.id, { toColumnId: 'done', version: 0 }),
+      move(x.id, { toColumnId: 'in_progress', nextId: p.id, version: 0 }),
+      move(x.id, { toColumnId: 'in_progress', prevId: q.id, version: 0 }),
     ]);
     const statuses = results.map((r) => r.status).sort();
     expect(statuses).toEqual([200, 409]);
 
     const winner = results.find((r) => r.status === 200).body.task;
     const saved = await Task.findById(x.id);
-    expect(saved.columnId).toBe(winner.columnId);
+    expect(saved.orderIndex).toBe(winner.orderIndex);
     expect(saved.version).toBe(1);
     // Only the winning move was logged.
     expect(await Activity.countDocuments({ action: 'moved' })).toBe(1);
   });
 
   it('rebalances a column when the gap gets too small, keeping order', async () => {
-    const [a, b] = await Task.insertMany([
-      { title: 'A', columnId: 'done', orderIndex: 1000 },
-      { title: 'B', columnId: 'done', orderIndex: 1000 + 1e-7 },
-      { title: 'C', columnId: 'done', orderIndex: 5000 },
-    ]);
+    const [a, b] = await place(
+      ['A', 'in_progress', 1000],
+      ['B', 'in_progress', 1000 + 1e-7],
+      ['C', 'in_progress', 5000]
+    );
     const x = (await create({ title: 'X' })).body;
 
     const res = await move(x.id, {
-      toColumnId: 'done',
+      toColumnId: 'in_progress',
       prevId: a.id,
       nextId: b.id,
       version: 0,
     });
     expect(res.status).toBe(200);
     expect(res.body.rebalanced).toBe(true);
-    expect(await columnTitles('done')).toEqual(['A', 'X', 'B', 'C']);
-    const indexes = (await Task.find({ columnId: 'done' }).sort({ orderIndex: 1 })).map(
+    expect(await columnTitles('in_progress')).toEqual(['A', 'X', 'B', 'C']);
+    const indexes = (await Task.find({ columnId: 'in_progress' }).sort({ orderIndex: 1 })).map(
       (t) => t.orderIndex
     );
     expect(indexes).toEqual([1000, 1500, 2000, 3000]);
@@ -187,6 +195,62 @@ describe('moving tasks', () => {
     const x = (await create({ title: 'X' })).body;
     const res = await move(x.id, { toColumnId: 'todo', prevId: x.id, version: 0 });
     expect(res.status).toBe(400);
+  });
+});
+
+describe('workflow states (To Do -> In Progress -> Done)', () => {
+  it('walks a task forward one step at a time', async () => {
+    const x = (await create({ title: 'X' })).body;
+    expect((await move(x.id, { toColumnId: 'in_progress', version: 0 })).status).toBe(200);
+    expect((await move(x.id, { toColumnId: 'done', version: 1 })).status).toBe(200);
+    expect((await Task.findById(x.id)).columnId).toBe('done');
+  });
+
+  it.each([
+    ['todo', 'done', 'can only move to In Progress, not Done'],
+    ['in_progress', 'todo', 'can only move to Done, not To Do'],
+    ['done', 'in_progress', 'final state'],
+    ['done', 'todo', 'final state'],
+  ])('rejects %s -> %s with 422 and leaves the task alone', async (from, to, message) => {
+    const [x] = await place(['X', from, 1000]);
+    const res = await move(x.id, { toColumnId: to, version: 0 });
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('INVALID_TRANSITION');
+    expect(res.body.error.message).toContain(message);
+
+    const saved = await Task.findById(x.id);
+    expect(saved).toMatchObject({ columnId: from, version: 0 });
+    expect(await Activity.countDocuments({ action: 'moved' })).toBe(0);
+  });
+
+  it('still allows reordering inside the final state', async () => {
+    const [a, b] = await place(['A', 'done', 1000], ['B', 'done', 2000]);
+    const res = await move(b.id, { toColumnId: 'done', nextId: a.id, version: 0 });
+    expect(res.status).toBe(200);
+    expect(await columnTitles('done')).toEqual(['B', 'A']);
+  });
+
+  it('publishes the workflow for the client at GET /api/workflow', async () => {
+    const res = await request(app).get('/api/workflow');
+    expect(res.status).toBe(200);
+    expect(res.body.states.map((s) => [s.id, s.transitions])).toEqual([
+      ['todo', ['in_progress']],
+      ['in_progress', ['done']],
+      ['done', []],
+    ]);
+  });
+
+  it('rejects an unknown state with 400', async () => {
+    const x = (await create({ title: 'X' })).body;
+    const res = await move(x.id, { toColumnId: 'review', version: 0 });
+    expect(res.status).toBe(400);
+  });
+
+  it('only creates tasks in To Do', async () => {
+    const res = await create({ title: 'Skip ahead', columnId: 'done' });
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('INVALID_TRANSITION');
+    expect(await Task.countDocuments()).toBe(0);
   });
 });
 
@@ -216,7 +280,7 @@ describe('activity log', () => {
 
   it('does not log anything when the write fails', async () => {
     const x = (await create({ title: 'X' })).body;
-    await move(x.id, { toColumnId: 'done', version: 99 });
+    await move(x.id, { toColumnId: 'in_progress', version: 99 });
     expect(await Activity.countDocuments({ action: 'moved' })).toBe(0);
   });
 });
@@ -226,7 +290,7 @@ describe('chaos middleware', () => {
     const x = (await create({ title: 'X' })).body;
     const res = await request(app)
       .patch(`/api/tasks/${x.id}/move?fail=1`)
-      .send({ toColumnId: 'done', version: 0 });
+      .send({ toColumnId: 'in_progress', version: 0 });
     expect(res.status).toBe(500);
     expect(res.body.error.code).toBe('CHAOS');
     expect((await Task.findById(x.id)).columnId).toBe('todo');
