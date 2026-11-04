@@ -9,7 +9,7 @@ TaskFlow is a Kanban board (**To Do → In Progress → Done**) built with Mongo
 - a workflow defined entirely on the backend (State pattern)
 - a persisted audit log of every change
 
-> **Live demo:** _add your deployed URL here_ · **Design write-up:** [DECISIONS.md](DECISIONS.md)
+> **Design write-up:** [DECISIONS.md](DECISIONS.md)
 
 ---
 
@@ -30,10 +30,9 @@ TaskFlow is a Kanban board (**To Do → In Progress → Done**) built with Mongo
 13. [Theming and responsive layout](#13-theming-and-responsive-layout)
 14. [Testing](#14-testing)
 15. [Project structure](#15-project-structure)
-16. [Deployment](#16-deployment)
-17. [Git workflow](#17-git-workflow)
-18. [Troubleshooting](#18-troubleshooting)
-19. [AI usage](#19-ai-usage)
+16. [Git workflow](#16-git-workflow)
+17. [Troubleshooting](#17-troubleshooting)
+18. [AI usage](#18-ai-usage)
 
 ---
 
@@ -54,7 +53,7 @@ TaskFlow is a Kanban board (**To Do → In Progress → Done**) built with Mongo
 | `DECISIONS.md` answering the 4 questions                                             | [DECISIONS.md](DECISIONS.md) in the repo root                                                                            |
 | `npm run seed` with realistic cards across all 3 columns, varied priorities and tags | `server/src/seed.js` (15 cards)                                                                                          |
 | `.env.example`, clear run commands                                                   | `server/.env.example`, `client/.env.example`, [Getting started](#4-getting-started)                                      |
-| Feature branches merged into `main` with conventional commits                        | See [Git workflow](#17-git-workflow)                                                                                     |
+| Feature branches merged into `main` with conventional commits                        | See [Git workflow](#16-git-workflow)                                                                                     |
 
 ---
 
@@ -93,7 +92,7 @@ TaskFlow is a Kanban board (**To Do → In Progress → Done**) built with Mongo
 | Drag and drop | `@dnd-kit/core` and `@dnd-kit/sortable`             | Maintained, accessible, keyboard and touch sensors (`react-beautiful-dnd` is deprecated)              |
 | Toasts        | `react-hot-toast`                                   | Tiny, accessible                                                                                      |
 | Backend       | Node 20+, Express 5                                 | Express 5 forwards rejected promises to the error handler, so there's no try/catch boilerplate        |
-| Database      | MongoDB with Mongoose 8                             | Transactions (needs a replica set), schema validation                                                 |
+| Database      | MongoDB 7 in Docker, with Mongoose 8                | Single-node replica set (for transactions) with data in a named volume; schema validation             |
 | Validation    | zod                                                 | Request schemas with clear 400 errors                                                                 |
 | Tests         | Vitest, Supertest, mongodb-memory-server            | Real HTTP tests against an in-memory **replica set**, so transactions are exercised                   |
 | Tooling       | ESLint 9 (flat config), Prettier, GitHub Actions CI | Lint, tests and build on every PR                                                                     |
@@ -105,9 +104,9 @@ TaskFlow is a Kanban board (**To Do → In Progress → Done**) built with Mongo
 ### Prerequisites
 
 - **Node.js 20 or newer** (`node -v`)
-- A **MongoDB replica set**. Transactions don't work on a standalone `mongod`. Either:
-  - **MongoDB Atlas** (the free M0 tier is a replica set), or
-  - **Docker** running a single-node replica set (below).
+- **Docker** with Docker Compose (`docker compose version`)
+
+> **MongoDB runs only in Docker.** This project currently uses a single MongoDB container started from `docker-compose.yml`. No hosted or locally installed MongoDB is used.
 
 ### Install and run
 
@@ -123,7 +122,7 @@ cd taskflow-kanban
 npm install
 ```
 
-Copy the environment templates:
+Copy the environment templates. The server template already points at the Docker database:
 
 ```bash
 cp server/.env.example server/.env
@@ -133,7 +132,13 @@ cp server/.env.example server/.env
 cp client/.env.example client/.env
 ```
 
-Then edit `server/.env` and set `MONGODB_URI` (see the next section). Then load the sample data and start the app:
+Start MongoDB in Docker. The command waits until the database is healthy and its replica set is initialised:
+
+```bash
+npm run db:up
+```
+
+Load the sample data, then start the app:
 
 ```bash
 npm run seed
@@ -145,32 +150,61 @@ npm run dev
 
 `npm run dev` starts the API on http://localhost:4000 and the client on http://localhost:5173. Open the client URL that Vite prints. If 5173 is taken, it uses the next free port, such as 5174.
 
-### Option A: MongoDB Atlas (free)
+### MongoDB in Docker
 
-1. Create a free **M0** cluster at https://www.mongodb.com/cloud/atlas.
-2. Under **Database Access**, add a user with a password.
-3. Under **Network Access**, allow your IP. Use `0.0.0.0/0` if you deploy to Vercel, whose IPs change.
-4. Under **Connect → Drivers**, copy the `mongodb+srv://…` string, add `/taskflow` before any `?`, and put it in `server/.env` as `MONGODB_URI`.
+`docker-compose.yml` defines one service, `mongo`:
 
-### Option B: local MongoDB with Docker
+| Setting        | Value                                                | Why                                                                           |
+| -------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Image          | `mongo:7`                                            | Official MongoDB 7 image                                                      |
+| Container name | `taskflow-mongo`                                     | Easy to target with `docker exec`                                             |
+| Command        | `--replSet rs0 --bind_ip_all`                        | Runs as a single-node **replica set**, which multi-document transactions need |
+| Port           | `27017:27017`                                        | The API connects on `localhost:27017`                                         |
+| Healthcheck    | `rs.status()`, or `rs.initiate()` on the first start | Initialises the replica set by itself; `npm run db:up` waits for it           |
+| Data volume    | `taskflow-mongo-data` → `/data/db`                   | Data lives outside the container (see below)                                  |
+| Restart policy | `unless-stopped`                                     | Comes back after Docker restarts                                              |
 
-Start a single-node replica set:
-
-```bash
-docker run -d -p 27017:27017 --name mongo mongo:7 --replSet rs0
-```
-
-```bash
-docker exec mongo mongosh --eval "rs.initiate()"
-```
-
-Then use this in `server/.env`:
+Connection string (already in `server/.env.example`):
 
 ```
 MONGODB_URI=mongodb://localhost:27017/taskflow?replicaSet=rs0&directConnection=true
 ```
 
-Next time, start the container again with `docker start mongo`.
+#### Persistent data in a named volume
+
+All database files are stored in a **named Docker volume called `taskflow-mongo-data`**, not inside the container. So:
+
+- **Removing the container keeps the data.** `npm run db:down`, deleting the container, or upgrading the image all leave the tasks and activity log in place. `npm run db:up` mounts the same data again.
+- **Any container can use the volume.** The name is fixed (it isn't prefixed with the Compose project name), so any `docker run` or other Compose file can mount it. For example:
+
+  ```bash
+  docker run -d --name another-mongo -p 27017:27017 -v taskflow-mongo-data:/data/db mongo:7 --replSet rs0 --bind_ip_all
+  ```
+
+  Only one MongoDB server may use the volume **at a time**, because `mongod` locks its data directory. Stop `taskflow-mongo` first (`npm run db:down`).
+
+- **Inspect or back up the volume:**
+
+  ```bash
+  docker volume inspect taskflow-mongo-data
+  ```
+
+  ```bash
+  docker exec taskflow-mongo mongodump --db taskflow --archive=/tmp/taskflow.archive
+  ```
+
+- **Wipe everything and start fresh** (this deletes the data permanently):
+
+  ```bash
+  docker compose down -v
+  ```
+
+| Command                                           | What it does                                                      |
+| ------------------------------------------------- | ----------------------------------------------------------------- |
+| `npm run db:up`                                   | Creates or starts `taskflow-mongo` and waits until it's healthy   |
+| `npm run db:down`                                 | Stops and removes the container; **the volume and data are kept** |
+| `docker compose logs -f mongo`                    | Shows the database logs                                           |
+| `docker exec -it taskflow-mongo mongosh taskflow` | Opens a Mongo shell on the app's database                         |
 
 ---
 
@@ -178,18 +212,18 @@ Next time, start the container again with `docker start mongo`.
 
 **`server/.env`**
 
-| Variable      | Required | Default   | Meaning                                                                                                                       |
-| ------------- | -------- | --------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `MONGODB_URI` | yes      | none      | Connection string. It must point at a replica set.                                                                            |
-| `PORT`        | no       | `4000`    | API port                                                                                                                      |
-| `CORS_ORIGIN` | no       | allow all | Comma-separated browser origins allowed to call the API, e.g. `http://localhost:5173` or your deployed client URL             |
-| `CHAOS_RATE`  | no       | `0`       | Probability (0–1) that **any** write request fails with a simulated 500. Use it to demo rollback; keep it at 0 in production. |
+| Variable      | Required | Default   | Meaning                                                                                                                   |
+| ------------- | -------- | --------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `MONGODB_URI` | yes      | none      | Connection string for the Docker MongoDB container (a replica set). The template value works as-is with `npm run db:up`.  |
+| `PORT`        | no       | `4000`    | API port                                                                                                                  |
+| `CORS_ORIGIN` | no       | allow all | Comma-separated browser origins allowed to call the API, e.g. `http://localhost:5173`                                     |
+| `CHAOS_RATE`  | no       | `0`       | Probability (0–1) that **any** write request fails with a simulated 500. Use it to demo rollback; keep it at 0 otherwise. |
 
 **`client/.env`**
 
-| Variable       | Required | Default | Meaning                                                                                                                                                       |
-| -------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `VITE_API_URL` | no       | `/api`  | API base URL. In development, Vite proxies `/api` to `localhost:4000`. In production, set it to the deployed API, e.g. `https://taskflow-api.vercel.app/api`. |
+| Variable       | Required | Default | Meaning                                                                                                             |
+| -------------- | -------- | ------- | ------------------------------------------------------------------------------------------------------------------- |
+| `VITE_API_URL` | no       | `/api`  | API base URL. Vite proxies `/api` to `localhost:4000`. Set a full URL only if the API runs on another host or port. |
 
 `.env` files are git-ignored; only the `.env.example` templates are committed.
 
@@ -199,15 +233,17 @@ Next time, start the container again with `docker start mongo`.
 
 Run these from the repository root (npm workspaces).
 
-| Command          | What it does                                                                                                                                             |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `npm install`    | Installs dependencies for the root, `client` and `server`                                                                                                |
-| `npm run dev`    | Runs the API (`node --watch`) and the client (Vite) together                                                                                             |
-| `npm run seed`   | **Resets** the database: deletes all tasks and activity, then inserts 15 realistic cards (6 / 4 / 5 across the columns, mixed priorities, 1–2 tags each) |
-| `npm test`       | Server API and unit tests, then client store and unit tests                                                                                              |
-| `npm run lint`   | ESLint over the whole repo                                                                                                                               |
-| `npm run format` | Prettier over the whole repo                                                                                                                             |
-| `npm run build`  | Production build of the client into `client/dist`                                                                                                        |
+| Command           | What it does                                                                                                                                             |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `npm run db:up`   | Starts MongoDB in Docker (named volume `taskflow-mongo-data`) and waits until it's healthy                                                               |
+| `npm run db:down` | Stops and removes the MongoDB container; the data volume is kept                                                                                         |
+| `npm install`     | Installs dependencies for the root, `client` and `server`                                                                                                |
+| `npm run dev`     | Runs the API (`node --watch`) and the client (Vite) together                                                                                             |
+| `npm run seed`    | **Resets** the database: deletes all tasks and activity, then inserts 15 realistic cards (6 / 4 / 5 across the columns, mixed priorities, 1–2 tags each) |
+| `npm test`        | Server API and unit tests, then client store and unit tests                                                                                              |
+| `npm run lint`    | ESLint over the whole repo                                                                                                                               |
+| `npm run format`  | Prettier over the whole repo                                                                                                                             |
+| `npm run build`   | Production build of the client into `client/dist`                                                                                                        |
 
 Run them per workspace with `-w`, for example `npm test -w server` or `npm run dev -w client`.
 
@@ -397,7 +433,7 @@ Available colour tokens: `slate`, `gray`, `indigo`, `blue`, `sky`, `violet`, `am
 npm test
 ```
 
-- **Server** (`server/tests`, Vitest and Supertest): tests run against **mongodb-memory-server as a replica set**, so transactions behave as they do on Atlas. They cover:
+- **Server** (`server/tests`, Vitest and Supertest): tests run against **mongodb-memory-server as a replica set**, so transactions behave as they do in the Docker replica set. They cover:
   - CRUD status codes and validation, including tags
   - version conflicts (409)
   - two concurrent moves with the same version, where exactly one gets 200 and the other 409
@@ -435,7 +471,6 @@ taskflow-kanban/
 │     ├─ store/                 boardStore (optimistic logic), settingsStore (name, chaos)
 │     └─ constants.js           priorities, badge styles, colour palette, tag rules
 ├─ server/
-│  ├─ api/index.js              Vercel serverless entry
 │  ├─ src/
 │  │  ├─ workflow/              State pattern: WorkflowState, Workflow, states/, index.js
 │  │  ├─ models/                Task, Activity
@@ -446,6 +481,7 @@ taskflow-kanban/
 │  │  ├─ routes.js, app.js, db.js, index.js, validation.js, errors.js, constants.js
 │  │  └─ seed.js                npm run seed
 │  └─ tests/                    API, concurrency and workflow tests
+├─ docker-compose.yml           MongoDB 7 replica set with the taskflow-mongo-data volume
 ├─ .github/workflows/ci.yml     lint, tests and build on PRs and on main
 ├─ DECISIONS.md                 design decisions (the 4 required questions and more)
 └─ package.json                 npm workspaces and root scripts
@@ -453,22 +489,7 @@ taskflow-kanban/
 
 ---
 
-## 16. Deployment
-
-Both parts can be deployed on Vercel's free tier, with MongoDB Atlas M0 as the database.
-
-1. Push the repo to GitHub.
-2. **API project:** in Vercel, choose **New Project**, import the repo and set the root directory to `server`. Add the environment variables `MONGODB_URI` and `CORS_ORIGIN` (the client URL). `server/api/index.js` exports the Express app, and `server/vercel.json` routes every path to it. The Mongo connection is cached between invocations.
-3. **Client project:** import the same repo again, with root directory `client` and the Vite framework preset. Set `VITE_API_URL=https://<api-project>.vercel.app/api`.
-4. In Atlas → Network Access, allow `0.0.0.0/0`, because Vercel's IPs change.
-5. Run `npm run seed` locally against the Atlas URI once, so the board starts with data.
-6. Put the client URL at the top of this README.
-
-The serverless API has a cold start of about 1s after it's been idle.
-
----
-
-## 17. Git workflow
+## 16. Git workflow
 
 - All work arrives on `main` through feature branches merged by pull request with a merge commit; nothing is committed to `main` directly.
 - Branches: `chore/project-setup`, `feature/task-api`, `feature/seed-script`, `test/concurrency-guard`, `feature/optimistic-ui`, `feature/board-ui`, `docs/decisions-ci`, `feature/configurable-workflow`, …
@@ -477,11 +498,13 @@ The serverless API has a cold start of about 1s after it's been idle.
 
 ---
 
-## 18. Troubleshooting
+## 17. Troubleshooting
 
 | Symptom                                                        | Cause and fix                                                                                                                                                     |
 | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Transaction numbers are only allowed on a replica set member` | MongoDB is a standalone server. Use Atlas, or the Docker command above with `--replSet rs0`, then `rs.initiate()`.                                                |
+| `Transaction numbers are only allowed on a replica set member` | MongoDB isn't running as a replica set. Start it with `npm run db:up`, which uses `--replSet rs0` and initialises it.                                             |
+| `ECONNREFUSED 127.0.0.1:27017` / `MongoServerSelectionError`   | The MongoDB container isn't running. Start Docker Desktop, then run `npm run db:up`.                                                                              |
+| `Bind for 0.0.0.0:27017 failed: port is already allocated`     | Another MongoDB container is using port 27017. Stop it (`docker stop <name>`), then run `npm run db:up`.                                                          |
 | The board stays on the loading skeleton                        | The API is still connecting to MongoDB (it can take 10–30s on a slow network), or `MONGODB_URI` is wrong. Watch the `[server]` lines in the `npm run dev` output. |
 | The board loads but is empty                                   | The database hasn't been seeded. Run `npm run seed`.                                                                                                              |
 | `Port 5173 is in use, trying another one...`                   | Another dev server is running. Use the URL Vite prints, or stop the other process.                                                                                |
@@ -490,6 +513,6 @@ The serverless API has a cold start of about 1s after it's been idle.
 
 ---
 
-## 19. AI usage
+## 18. AI usage
 
 The brief allows transparent AI use. I built this project with help from Claude (Anthropic) for scaffolding, reviewing the concurrency design and drafting tests. I reviewed, ran and can explain every line. The real mistakes the AI made, and how I caught and fixed them, are in [DECISIONS.md → AI retrospective](DECISIONS.md#3-ai-retrospective).

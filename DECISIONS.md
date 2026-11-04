@@ -69,7 +69,7 @@ I used Claude (via Claude Code) to scaffold the project, review the concurrency 
 4. **Node version mismatch.** It suggested `node --env-file-if-exists`, which only exists in Node 22.9+, while the project targets Node 20. I switched to `dotenv`.
 5. **Zustand v5 selector returning a new array.** A selector like `s => sortedColumn(s.tasks, id)` returns a new array every time, which in Zustand v5 causes an infinite render loop. The columns are now derived with `useMemo` from the `tasks` map in `Board.jsx`.
 
-_(Add anything else you hit while building, such as deployment issues and dnd-kit quirks. Real mistakes are what this section is graded on.)_
+_(Add anything else you hit while building, such as dnd-kit quirks. Real mistakes are what this section is graded on.)_
 
 ## Extra: workflow rules with the State pattern
 
@@ -137,4 +137,4 @@ The desktop layout fits any number of columns, which share the width with a mini
 - **Real-time:** MongoDB **change streams** into a Socket.IO (or SSE) gateway. Clients apply remote patches to `confirmed` and to `tasks` (except where a local change is pending). 409s become rare, and a 409 updates one card instead of reloading everything.
 - **Ordering:** switch from floats to **LexoRank-style string keys**, which have effectively unlimited precision between two neighbours. Rebalances become rare background jobs per bucket instead of a blocking transaction.
 - **Activity:** TTL index or monthly archiving, a `{ taskId, createdAt }` index for per-card history, and writing the log through the change stream (outbox pattern) instead of inside every transaction.
-- **Infrastructure:** move off the M0 tier (shared CPU, connection limits), run a connection pool per API instance, and add rate limiting on write routes. Serverless cold starts (~1s on Vercel) would also matter at this scale, so use a long-running Node service once WebSockets are needed.
+- **Infrastructure:** move from the single Docker MongoDB container to a proper multi-node replica set (so reads can go to secondaries and one node can fail), run a connection pool per API instance, and add rate limiting on write routes. Real-time sync needs a long-running Node service that holds WebSocket connections.
