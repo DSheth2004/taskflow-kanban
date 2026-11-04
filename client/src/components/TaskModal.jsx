@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
-import { PRIORITIES } from '../constants';
+import { MAX_TAGS, PRIORITIES, parseTags } from '../constants';
 import { useBoardStore } from '../store/boardStore';
 import { XIcon } from './Icons';
 
-// One modal for both modes: pass `taskId` to edit, or nothing to create.
 export default function TaskModal({ taskId, onClose }) {
   const task = useBoardStore((s) => (taskId ? s.tasks[taskId] : null));
   const createTask = useBoardStore((s) => s.createTask);
@@ -13,8 +12,7 @@ export default function TaskModal({ taskId, onClose }) {
   const advanceTask = useBoardStore((s) => s.advanceTask);
   const workflow = useBoardStore((s) => s.workflow);
   const isEdit = Boolean(taskId);
-  // New tasks always start in the initial state; existing ones show where they are and
-  // get one "Move to" button per transition their state allows.
+
   const state = task ? workflow.stateOf(task.columnId) : workflow.initial;
   const nextStates = isEdit ? (state?.transitions ?? []).map(workflow.stateOf) : [];
 
@@ -22,6 +20,7 @@ export default function TaskModal({ taskId, onClose }) {
     title: task?.title ?? '',
     description: task?.description ?? '',
     priority: task?.priority ?? 'Medium',
+    tags: (task?.tags ?? []).join(', '),
   }));
   const [submitting, setSubmitting] = useState(false);
   const titleRef = useRef(null);
@@ -33,7 +32,6 @@ export default function TaskModal({ taskId, onClose }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  // The task was deleted (here or by a refresh) while the modal was open.
   useEffect(() => {
     if (isEdit && !task) onClose();
   }, [isEdit, task, onClose]);
@@ -45,13 +43,24 @@ export default function TaskModal({ taskId, onClose }) {
     e.preventDefault();
     if (!title) return;
     if (isEdit) {
-      updateTask(taskId, { title, description: form.description, priority: form.priority });
-      onClose(); // optimistic: the store rolls back and toasts if the save fails
+      updateTask(taskId, {
+        title,
+        description: form.description,
+        priority: form.priority,
+        tags: parseTags(form.tags),
+      });
+      onClose();
       return;
     }
     setSubmitting(true);
     try {
-      await createTask({ ...form, title, columnId: workflow.initial.id });
+      await createTask({
+        title,
+        description: form.description,
+        priority: form.priority,
+        tags: parseTags(form.tags),
+        columnId: workflow.initial.id,
+      });
       onClose();
     } catch (err) {
       toast.error(`Couldn't create task: ${err.message}`);
@@ -79,7 +88,7 @@ export default function TaskModal({ taskId, onClose }) {
         aria-modal="true"
         aria-labelledby="task-modal-title"
         onSubmit={handleSubmit}
-        // Bottom sheet on phones, centred dialog from sm up; scrolls if the keyboard squeezes it.
+
         className="max-h-[92dvh] w-full overflow-y-auto rounded-t-2xl bg-white p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] shadow-2xl sm:max-w-md sm:rounded-2xl dark:bg-slate-900 dark:ring-1 dark:ring-slate-800"
       >
         <div className="mb-4 flex items-center">
@@ -115,6 +124,14 @@ export default function TaskModal({ taskId, onClose }) {
               onChange={set('description')}
               maxLength={2000}
               placeholder="Optional details"
+            />
+          </Field>
+          <Field label={`Tags (comma-separated, up to ${MAX_TAGS})`}>
+            <input
+              className="input"
+              value={form.tags}
+              onChange={set('tags')}
+              placeholder="frontend, bug"
             />
           </Field>
           <div className="grid grid-cols-2 gap-3">

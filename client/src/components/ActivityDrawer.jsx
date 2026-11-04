@@ -4,7 +4,7 @@ import { useBoardStore } from '../store/boardStore';
 import { useSettingsStore } from '../store/settingsStore';
 import { XIcon } from './Icons';
 
-const POLL_MS = 10_000; // picks up other people's changes while the drawer is open
+const POLL_MS = 10_000;
 
 const ACTION_STYLE = {
   created: 'bg-emerald-500',
@@ -14,32 +14,33 @@ const ACTION_STYLE = {
 };
 
 function describe(entry, labelOf) {
-  const title = <span className="font-medium">&ldquo;{entry.taskTitle}&rdquo;</span>;
+  const title = <span className="font-medium">&lsquo;{entry.taskTitle}&rsquo;</span>;
+  const column = (id) => <span className="font-medium">&lsquo;{labelOf(id)}&rsquo;</span>;
   switch (entry.action) {
     case 'created':
       return (
         <>
-          Created {title} in {labelOf(entry.to)}
+          Task {title} created in {column(entry.to)}
         </>
       );
     case 'moved':
       return entry.from === entry.to ? (
         <>
-          Reordered {title} in {labelOf(entry.to)}
+          Task {title} reordered in {column(entry.to)}
         </>
       ) : (
         <>
-          Moved {title} from {labelOf(entry.from)} to {labelOf(entry.to)}
+          Task {title} moved from {column(entry.from)} to {column(entry.to)}
         </>
       );
     case 'updated':
       return (
         <>
-          Updated {entry.changes?.join(', ') ?? 'details'} of {title}
+          Task {title}: {entry.changes?.join(', ') ?? 'details'} updated
         </>
       );
     case 'deleted':
-      return <>Deleted {title}</>;
+      return <>Task {title} deleted</>;
     default:
       return title;
   }
@@ -54,21 +55,20 @@ const timeFormat = new Intl.DateTimeFormat(undefined, {
 
 export default function ActivityDrawer({ open, onClose }) {
   const activityVersion = useBoardStore((s) => s.activityVersion);
-  // Labels come from the workflow; ids of states that no longer exist are shown as-is.
+
   const labelOf = useBoardStore((s) => s.workflow?.labelOf) ?? ((id) => id);
   const actor = useSettingsStore((s) => s.actor);
   const setActor = useSettingsStore((s) => s.setActor);
-  // Kept together so a poll can merge the newest page without losing older loaded pages.
-  const [log, setLog] = useState({ items: [], cursor: null });
-  const [state, setState] = useState('idle'); // idle | loading | error
 
-  // Loads the newest page and keeps any older entries already fetched via "Load older".
+  const [log, setLog] = useState({ items: [], cursor: null });
+  const [state, setState] = useState('idle');
+
   const loadLatest = useCallback(async () => {
     try {
       const page = await api.listActivity();
       setLog((prev) => {
         const oldest = page.items.at(-1)?.id;
-        // ObjectId hex strings sort by creation time.
+
         const older = oldest ? prev.items.filter((i) => i.id < oldest) : [];
         return {
           items: [...page.items, ...older],
@@ -166,7 +166,7 @@ export default function ActivityDrawer({ open, onClose }) {
                 />
                 <p className="text-sm leading-snug">{describe(entry, labelOf)}</p>
                 <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                  {entry.actor} · {timeFormat.format(new Date(entry.createdAt))}
+                  by {entry.actor} at {timeFormat.format(new Date(entry.createdAt))}
                 </p>
               </li>
             ))}

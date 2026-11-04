@@ -5,7 +5,6 @@ export function notFoundRoute(req, _res, next) {
   next(new HttpError(404, 'ROUTE_NOT_FOUND', `No route for ${req.method} ${req.path}`));
 }
 
-// eslint-disable-next-line no-unused-vars -- Express identifies error handlers by arity (4 args)
 export function errorHandler(err, _req, res, _next) {
   let error = err;
   if (err instanceof mongoose.Error.ValidationError) {

@@ -22,13 +22,13 @@ const t = (id, columnId, orderIndex, extra = {}) => ({
   title: id.toUpperCase(),
   description: '',
   priority: 'Medium',
+  tags: [],
   columnId,
   orderIndex,
   version: 0,
   ...extra,
 });
 
-// What GET /api/workflow returns for the default To Do -> In Progress -> Done board.
 const WORKFLOW = {
   states: [
     {
@@ -58,7 +58,6 @@ const WORKFLOW = {
   ],
 };
 
-// A promise we can resolve/reject from the test, to simulate a slow network.
 function deferred() {
   let resolve, reject;
   const promise = new Promise((res, rej) => {
@@ -68,7 +67,6 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-// Lets queued jobs start (the queue starts each job on a later microtask).
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 const ids = (store, col) => sortedColumn(store.getState().tasks, col).map((x) => x.id);
@@ -78,7 +76,7 @@ let store;
 beforeEach(async () => {
   vi.clearAllMocks();
   api.getWorkflow.mockResolvedValue(WORKFLOW);
-  // a, b, c are in progress (so moving them to Done is legal), d is done, e is new.
+
   api.listTasks.mockResolvedValue([
     t('a', 'in_progress', 1000),
     t('b', 'in_progress', 2000),
@@ -92,7 +90,7 @@ beforeEach(async () => {
 
 describe('optimistic move', () => {
   it('updates the screen before the server answers', () => {
-    api.moveTask.mockReturnValue(new Promise(() => {})); // never resolves
+    api.moveTask.mockReturnValue(new Promise(() => {}));
     store.getState().moveTask('a', 'done', 1);
     expect(ids(store, 'done')).toEqual(['d', 'a']);
     expect(ids(store, 'in_progress')).toEqual(['b', 'c']);
@@ -149,7 +147,7 @@ describe('rollback', () => {
     api.moveTask.mockRejectedValue(httpError(409));
     store.getState().moveTask('a', 'done', 0);
     await store.getState().whenIdle();
-    expect(api.listTasks).toHaveBeenCalledTimes(2); // initial load + refresh
+    expect(api.listTasks).toHaveBeenCalledTimes(2);
   });
 
   it('restores a deleted card if the delete fails', async () => {
@@ -158,6 +156,15 @@ describe('rollback', () => {
     expect(store.getState().tasks.b).toBeUndefined();
     await store.getState().whenIdle();
     expect(store.getState().tasks.b).toMatchObject({ title: 'B', orderIndex: 2000 });
+  });
+
+  it('sends changed tags and reverts them if the save fails', async () => {
+    api.updateTask.mockRejectedValue(httpError(500));
+    store.getState().updateTask('a', { tags: ['bug'] });
+    expect(store.getState().tasks.a.tags).toEqual(['bug']);
+    await store.getState().whenIdle();
+    expect(api.updateTask).toHaveBeenCalledWith('a', { tags: ['bug'], version: 0 });
+    expect(store.getState().tasks.a.tags).toEqual([]);
   });
 
   it('reverts only the edited fields when an edit fails', async () => {
@@ -179,16 +186,15 @@ describe('rapid interactions', () => {
     });
 
     const { moveTask } = store.getState();
-    moveTask('a', 'done', 1); //        request #1: below d
-    await flush(); //                   ...now in flight
-    moveTask('a', 'done', 0); //        queued behind it: above d
-    moveTask('a', 'done', 1); //        same card: folded into the queued job
+    moveTask('a', 'done', 1);
+    await flush();
+    moveTask('a', 'done', 0);
+    moveTask('a', 'done', 1);
 
     expect(api.moveTask).toHaveBeenCalledTimes(1);
     first.resolve({ task: t('a', 'done', 2000, { version: 1 }), rebalanced: false });
     await store.getState().whenIdle();
 
-    // Two requests in total, the second carrying the newest position and version.
     expect(api.moveTask).toHaveBeenCalledTimes(2);
     expect(api.moveTask.mock.calls[1]).toEqual([
       'a',
@@ -202,14 +208,13 @@ describe('rapid interactions', () => {
     const second = deferred();
     api.moveTask.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
 
-    store.getState().moveTask('a', 'done', 1); // below d
+    store.getState().moveTask('a', 'done', 1);
     await flush();
-    store.getState().moveTask('a', 'done', 0); // user moved it above d while #1 is in flight
+    store.getState().moveTask('a', 'done', 0);
 
     first.resolve({ task: t('a', 'done', 2000, { version: 1 }), rebalanced: false });
     await flush();
 
-    // Response #1 arrived, but the card stays where the user last put it.
     expect(ids(store, 'done')).toEqual(['a', 'd']);
     expect(store.getState().confirmed.a.version).toBe(1);
 
@@ -243,12 +248,11 @@ describe('rapid interactions', () => {
       rebalanced: false,
     });
 
-    store.getState().moveTask('a', 'done', 1); // a below d, in flight
-    store.getState().moveTask('b', 'done', 2); // b below a, queued
+    store.getState().moveTask('a', 'done', 1);
+    store.getState().moveTask('b', 'done', 2);
     first.resolve({ task: t('a', 'done', 2000, { version: 1 }), rebalanced: false });
     await store.getState().whenIdle();
 
-    // When b's job ran, a was already confirmed, so it is a valid neighbour.
     expect(api.moveTask.mock.calls[1][1]).toMatchObject({ prevId: 'a', nextId: null });
   });
 
@@ -265,9 +269,9 @@ describe('rapid interactions', () => {
 
 describe('workflow states', () => {
   it.each([
-    ['e', 'done', 'To Do can only move to In Progress'], // skipping a step
-    ['a', 'todo', 'In Progress can only move to Done'], // going backwards
-    ['d', 'in_progress', 'final state'], // leaving the final state
+    ['e', 'done', 'To Do can only move to In Progress'],
+    ['a', 'todo', 'In Progress can only move to Done'],
+    ['d', 'in_progress', 'final state'],
   ])('blocks %s -> %s locally, without calling the API', (id, to, message) => {
     const before = store.getState().tasks[id];
     store.getState().moveTask(id, to, 0);
@@ -306,7 +310,6 @@ describe('workflow states', () => {
       })
       .mockResolvedValueOnce({ task: t('e', 'done', 2000, { version: 2 }), rebalanced: false });
 
-    // Both drags happen before the first request starts, so they share one job.
     store.getState().moveTask('e', 'in_progress', 3);
     store.getState().moveTask('e', 'done', 1);
     await store.getState().whenIdle();
@@ -320,7 +323,6 @@ describe('workflow states', () => {
   });
 });
 
-// The store only knows what the server sends, so a new state needs no client changes.
 describe('a workflow with an extra state from the server', () => {
   beforeEach(async () => {
     api.getWorkflow.mockResolvedValue({
@@ -346,14 +348,14 @@ describe('a workflow with an extra state from the server', () => {
   });
 
   it('enforces the new transitions', () => {
-    store.getState().moveTask('a', 'done', 0); // In Progress must now go through Review
+    store.getState().moveTask('a', 'done', 0);
     expect(api.moveTask).not.toHaveBeenCalled();
     expect(toast.error).toHaveBeenCalledWith(
       'A task in In Progress can only move to Review, not Done.'
     );
 
     api.moveTask.mockReturnValue(new Promise(() => {}));
-    store.getState().moveTask('r', 'in_progress', 0); // Review can send work back
+    store.getState().moveTask('r', 'in_progress', 0);
     expect(ids(store, 'in_progress')).toEqual(['r', 'a']);
   });
 });

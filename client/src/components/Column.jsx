@@ -6,15 +6,12 @@ import { PlusIcon } from './Icons';
 
 export const COLUMN_PREFIX = 'column:';
 
-// `column` is a workflow state from the server: { id, label, color, isInitial, ... }.
 export default function Column({ column, tasks, highlighted, blocked, onAddTask, onEditTask }) {
   const { setNodeRef } = useDroppable({ id: COLUMN_PREFIX + column.id });
-  // New tasks can only be created in the workflow's initial state.
+
   const canCreate = column.isInitial;
 
   return (
-    // Phones: each column is most of the screen wide and snaps into place.
-    // md and up: the columns share the width equally (any number of them).
     <section
       id={`column-${column.id}`}
       aria-labelledby={`col-${column.id}`}
@@ -54,7 +51,6 @@ export default function Column({ column, tasks, highlighted, blocked, onAddTask,
       </div>
 
       <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-        {/* The list scrolls on its own, so the board itself never needs a page scroll. */}
         <ul
           ref={setNodeRef}
           className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto overscroll-contain px-3 pb-3"

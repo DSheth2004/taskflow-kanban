@@ -20,9 +20,6 @@ import { TaskCardView } from './TaskCard';
 const columnIdOf = (droppableId) =>
   String(droppableId).startsWith(COLUMN_PREFIX) ? droppableId.slice(COLUMN_PREFIX.length) : null;
 
-// Prefer the card under the pointer. In the gap between cards, snap to the nearest card in
-// that column (so a drop between two cards lands between them, not at the bottom). Fall
-// back to the column itself when it is empty, and to closestCorners for keyboard drags.
 function collisionDetection(args) {
   const hits = pointerWithin(args);
   const cardHit = hits.find((h) => !columnIdOf(h.id));
@@ -41,7 +38,7 @@ function collisionDetection(args) {
 
 export default function Board({ onAddTask, onEditTask }) {
   const tasks = useBoardStore((s) => s.tasks);
-  // One column per workflow state, in the order the server defines them.
+
   const workflow = useBoardStore((s) => s.workflow);
   const states = workflow.states;
   const moveTask = useBoardStore((s) => s.moveTask);
@@ -50,22 +47,18 @@ export default function Board({ onAddTask, onEditTask }) {
   const [visibleColumn, setVisibleColumn] = useState(states[0]?.id);
   const scrollerRef = useRef(null);
 
-  // Derived, never stored: a card exists once in `tasks`, so it can't be in two columns.
   const columns = useMemo(
     () => Object.fromEntries(states.map((c) => [c.id, sortedColumn(tasks, c.id)])),
     [tasks, states]
   );
 
   const sensors = useSensors(
-    // Mouse: a small distance threshold keeps plain clicks working for opening the editor.
     useSensor(MouseSensor, { activationConstraint: { distance: 5 } }),
-    // Touch: drag starts after a short press, so a normal swipe still scrolls the board.
+
     useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
-  // On narrow screens the columns sit in a horizontal, snapping scroller. Track which one
-  // is centred so the tab strip can highlight it, and let the tabs scroll to a column.
   function handleScroll() {
     const scroller = scrollerRef.current;
     if (!scroller) return;
@@ -81,7 +74,6 @@ export default function Board({ onAddTask, onEditTask }) {
     setVisibleColumn(closest);
   }
 
-  // Scrolls only the board (scrollIntoView would also shift the page itself sideways).
   function showColumn(columnId) {
     const scroller = scrollerRef.current;
     const el = document.getElementById(`column-${columnId}`);
@@ -105,14 +97,10 @@ export default function Board({ onAddTask, onEditTask }) {
     const others = columns[toColumnId].filter((t) => t.id !== active.id);
     let toIndex;
     if (columnIdOf(over.id)) {
-      toIndex = others.length; // dropped on the column itself: go to the end
+      toIndex = others.length;
     } else if (toColumnId === task.columnId) {
-      // Same column: dnd-kit's sortable preview uses arrayMove semantics, where the
-      // card takes the index of the card it is over.
       toIndex = columns[toColumnId].findIndex((t) => t.id === over.id);
     } else {
-      // Another column: insert above or below the hovered card depending on which
-      // half of it the dragged card's centre is in.
       const overIndex = others.findIndex((t) => t.id === over.id);
       const dragged = active.rect.current.translated;
       const below =
@@ -122,7 +110,6 @@ export default function Board({ onAddTask, onEditTask }) {
     moveTask(active.id, toColumnId, toIndex);
   }
 
-  // While dragging, columns the card's current state can't move to are shown as locked.
   const activeState = tasks[activeId] ? workflow.stateOf(tasks[activeId].columnId) : null;
 
   return (
@@ -159,7 +146,6 @@ export default function Board({ onAddTask, onEditTask }) {
           ))}
         </nav>
 
-        {/* Snap scrolling is turned off mid-drag so dnd-kit can auto-scroll smoothly. */}
         <div
           ref={scrollerRef}
           onScroll={handleScroll}

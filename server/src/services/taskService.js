@@ -5,8 +5,6 @@ import { orderBetween, needsRebalance, STEP } from '../lib/ordering.js';
 import { workflow } from '../workflow/index.js';
 import { notFound, conflict, invalidTransition, HttpError } from '../errors.js';
 
-// Runs fn inside a multi-document transaction. withTransaction retries on transient
-// errors (e.g. two transactions writing the same task); errors we throw ourselves abort it.
 async function inTransaction(fn) {
   const session = await mongoose.startSession();
   try {
@@ -30,8 +28,10 @@ export function listTasks() {
   return Task.find().sort({ columnId: 1, orderIndex: 1 });
 }
 
+const sameValue = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
 export function createTask(
-  { title, description, priority, columnId = workflow.initial.id },
+  { title, description, priority, tags = [], columnId = workflow.initial.id },
   actor
 ) {
   if (!workflow.stateOf(columnId).isInitial) {
@@ -45,6 +45,7 @@ export function createTask(
           title,
           description,
           priority,
+          tags,
           columnId,
           orderIndex: orderBetween(last?.orderIndex, null),
         },
@@ -62,10 +63,10 @@ export function updateTask(id, { version, ...fields }, actor) {
     if (!before) throw notFound();
     if (before.version !== version) throw conflict();
 
-    const changes = Object.keys(fields).filter((key) => fields[key] !== before[key]);
+    const current = before.toObject();
+    const changes = Object.keys(fields).filter((key) => !sameValue(fields[key], current[key]));
     if (changes.length === 0) return before;
 
-    // Still conditional on version: the read above is only a fast path for a clear error.
     const task = await Task.findOneAndUpdate(
       { _id: id, version },
       { $set: fields, $inc: { version: 1 } },
@@ -85,8 +86,6 @@ export function deleteTask(id, actor) {
   });
 }
 
-// Renumbers a column to 1000, 2000, ... keeping its current order. Versions are not bumped
-// because no card's relative position changes; the client refetches when told it happened.
 async function rebalanceColumn(columnId, excludeId, session) {
   const tasks = await Task.find({ columnId, _id: { $ne: excludeId } })
     .sort({ orderIndex: 1 })
@@ -100,15 +99,12 @@ async function rebalanceColumn(columnId, excludeId, session) {
   );
 }
 
-// Finds the two cards the moved card should sit between, as the server sees them.
-// The client names its intended neighbours; we anchor on prev (or next) and look up the
-// real card on the other side, so a card the client hasn't seen yet can never tie with ours.
 async function findSlot(id, columnId, prevId, nextId, session) {
   const inColumn = { columnId, _id: { $ne: id } };
   const load = async (neighbourId) => {
     if (!neighbourId) return null;
     const doc = await Task.findOne({ ...inColumn, _id: neighbourId }).session(session);
-    // Neighbour moved or deleted since the client loaded the board.
+
     if (!doc) throw conflict('The board changed while you were moving this card. Refreshing.');
     return doc;
   };
@@ -139,7 +135,6 @@ export function moveTask(id, { toColumnId, prevId, nextId, version }, actor) {
     if (!current) throw notFound();
     if (current.version !== version) throw conflict();
 
-    // The task's current state decides whether it may go to toColumnId.
     const from = workflow.stateOf(current.columnId);
     if (!from.canMoveTo(toColumnId)) {
       throw invalidTransition(workflow.whyNot(from.id, toColumnId));
@@ -153,8 +148,6 @@ export function moveTask(id, { toColumnId, prevId, nextId, version }, actor) {
       rebalanced = true;
     }
 
-    // Single-document atomic write: only this card changes, and only if nobody else
-    // bumped its version in between. Zero matches means we lost the race -> 409.
     const task = await Task.findOneAndUpdate(
       { _id: id, version },
       {
@@ -172,7 +165,7 @@ export function moveTask(id, { toColumnId, prevId, nextId, version }, actor) {
 
 export async function listActivity({ limit, before }) {
   const filter = before ? { _id: { $lt: before } } : {};
-  // ObjectIds grow with insertion time, so _id doubles as a stable pagination cursor.
+
   const items = await Activity.find(filter)
     .sort({ _id: -1 })
     .limit(limit + 1);

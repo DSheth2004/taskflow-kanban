@@ -2,8 +2,6 @@ import { useTheme } from '../hooks/useTheme';
 import { useSettingsStore } from '../store/settingsStore';
 import { BoltIcon, HistoryIcon, MoonIcon, PlusIcon, SunIcon } from './Icons';
 
-// One row on every screen size: labels collapse to icons on narrow screens instead of
-// the row wrapping. The display name lives in the Activity drawer.
 export default function Header({ onNewTask, onOpenActivity }) {
   const { theme, toggle } = useTheme();
   const chaos = useSettingsStore((s) => s.chaos);

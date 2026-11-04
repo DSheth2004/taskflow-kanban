@@ -24,13 +24,12 @@ describe('the configured workflow', () => {
   });
 });
 
-// Proves the extension point: a new state is one class plus a list entry.
 describe('adding a state', () => {
   class ReviewState extends WorkflowState {
     id = 'review';
     label = 'Review';
     color = 'amber';
-    transitions = ['done', 'in_progress']; // approve, or send back for changes
+    transitions = ['done', 'in_progress'];
   }
   class InProgressState extends WorkflowState {
     id = 'in_progress';
