@@ -11,6 +11,8 @@
     "node": ">=20"
   },
   "scripts": {
+    "db:up": "docker compose up -d --wait mongo",
+    "db:down": "docker compose down",
     "dev": "concurrently -n server,client -c blue,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
     "seed": "npm run seed -w server",
     "test": "npm test -w server && npm test -w client",
