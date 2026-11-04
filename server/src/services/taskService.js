@@ -2,7 +2,8 @@ import mongoose from 'mongoose';
 import { Task } from '../models/Task.js';
 import { Activity } from '../models/Activity.js';
 import { orderBetween, needsRebalance, STEP } from '../lib/ordering.js';
-import { notFound, conflict, HttpError } from '../errors.js';
+import { workflow } from '../workflow/index.js';
+import { notFound, conflict, invalidTransition, HttpError } from '../errors.js';
 
 // Runs fn inside a multi-document transaction. withTransaction retries on transient
 // errors (e.g. two transactions writing the same task); errors we throw ourselves abort it.
@@ -29,7 +30,13 @@ export function listTasks() {
   return Task.find().sort({ columnId: 1, orderIndex: 1 });
 }
 
-export function createTask({ title, description, priority, columnId }, actor) {
+export function createTask(
+  { title, description, priority, columnId = workflow.initial.id },
+  actor
+) {
+  if (!workflow.stateOf(columnId).isInitial) {
+    throw invalidTransition(`New tasks must start in ${workflow.initial.label}.`);
+  }
   return inTransaction(async (session) => {
     const last = await Task.findOne({ columnId }).sort({ orderIndex: -1 }).session(session);
     const [task] = await Task.create(
@@ -131,6 +138,12 @@ export function moveTask(id, { toColumnId, prevId, nextId, version }, actor) {
     const current = await Task.findById(id).session(session);
     if (!current) throw notFound();
     if (current.version !== version) throw conflict();
+
+    // The task's current state decides whether it may go to toColumnId.
+    const from = workflow.stateOf(current.columnId);
+    if (!from.canMoveTo(toColumnId)) {
+      throw invalidTransition(workflow.whyNot(from.id, toColumnId));
+    }
 
     let slot = await findSlot(id, toColumnId, prevId, nextId, session);
     let rebalanced = false;

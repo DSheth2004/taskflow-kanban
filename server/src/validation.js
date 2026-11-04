@@ -1,5 +1,8 @@
 import { z } from 'zod';
-import { COLUMN_IDS, PRIORITIES } from './constants.js';
+import { PRIORITIES } from './constants.js';
+import { workflow } from './workflow/index.js';
+
+const stateId = z.enum(workflow.ids);
 
 const objectId = z.string().regex(/^[a-f\d]{24}$/i, 'must be a valid id');
 
@@ -9,7 +12,7 @@ export const createTaskBody = z.object({
   title: z.string().trim().min(1, 'is required').max(120),
   description: z.string().max(2000).optional().default(''),
   priority: z.enum(PRIORITIES).optional().default('Medium'),
-  columnId: z.enum(COLUMN_IDS).optional().default('todo'),
+  columnId: stateId.optional(), // defaults to the workflow's initial state
 });
 
 export const updateTaskBody = z
@@ -22,7 +25,7 @@ export const updateTaskBody = z
   .strict(); // columnId/orderIndex can only change through /move
 
 export const moveTaskBody = z.object({
-  toColumnId: z.enum(COLUMN_IDS),
+  toColumnId: stateId,
   prevId: objectId.nullable().optional(),
   nextId: objectId.nullable().optional(),
   version: z.number().int().nonnegative(),
