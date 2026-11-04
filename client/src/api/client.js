@@ -5,7 +5,7 @@ const BASE = import.meta.env.VITE_API_URL || '/api';
 export class ApiError extends Error {
   constructor(status, code, message) {
     super(message);
-    this.status = status; // 0 means the request never reached the server
+    this.status = status;
     this.code = code;
   }
 }
@@ -13,7 +13,7 @@ export class ApiError extends Error {
 async function request(path, { method = 'GET', body } = {}) {
   const { actor, chaos } = useSettingsStore.getState();
   const headers = { 'Content-Type': 'application/json' };
-  // Header values must be ASCII, so the name is URI-encoded and decoded on the server.
+
   if (actor) headers['x-actor'] = encodeURIComponent(actor);
   if (chaos) headers['x-chaos'] = '1';
 

@@ -10,7 +10,7 @@ export default function App() {
   const loadBoard = useBoardStore((s) => s.loadBoard);
   const status = useBoardStore((s) => s.status);
   const error = useBoardStore((s) => s.error);
-  // null = closed, {} = create, { taskId } = edit
+
   const [modal, setModal] = useState(null);
   const [activityOpen, setActivityOpen] = useState(false);
 
@@ -18,15 +18,12 @@ export default function App() {
     loadBoard();
   }, [loadBoard]);
 
-  // Stable callbacks so memoised task cards don't re-render when App does.
   const addTask = useCallback(() => setModal({}), []);
   const editTask = useCallback((taskId) => setModal({ taskId }), []);
   const closeModal = useCallback(() => setModal(null), []);
   const closeActivity = useCallback(() => setActivityOpen(false), []);
 
   return (
-    // The app fills exactly one screen (dvh accounts for mobile browser toolbars); columns
-    // scroll inside themselves, so the layout is the same on phones, tablets and desktops.
     <div className="flex h-dvh flex-col">
       <Header onNewTask={addTask} onOpenActivity={() => setActivityOpen(true)} />
 

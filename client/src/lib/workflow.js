@@ -1,10 +1,3 @@
-// The workflow is defined on the server (server/src/workflow: one class per state) and
-// fetched from GET /api/workflow. This turns that JSON into an object the UI can ask
-// questions of. Nothing here knows any state by name, so adding, removing or reordering
-// states on the server changes the board with no client code changes.
-//
-// The server stays the authority; these checks only give instant feedback (blocked
-// drops, greyed-out columns) before a request is sent.
 export function createWorkflow({ states }) {
   const byId = new Map(
     states.map((s) => [
@@ -15,10 +8,8 @@ export function createWorkflow({ states }) {
   const list = [...byId.values()];
 
   const stateOf = (id) => byId.get(id) ?? null;
-  const labelOf = (id) => byId.get(id)?.label ?? id; // ids of removed states still display
+  const labelOf = (id) => byId.get(id)?.label ?? id;
 
-  /** Shortest list of states to pass through from one state to another
-   *  ([] for the same state, null if unreachable). Mirrors Workflow.pathTo on the server. */
   function pathTo(fromId, toId) {
     if (fromId === toId) return [];
     const previous = new Map([[fromId, null]]);

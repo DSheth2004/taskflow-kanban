@@ -1,9 +1,6 @@
-// The context that holds the states. It validates the configuration once at startup and
-// answers questions that span several states (paths, error messages). Rules about a
-// single state stay on that state.
 export class Workflow {
   constructor(states) {
-    this.states = states; // board column order = array order
+    this.states = states;
     this.byId = new Map(states.map((s) => [s.id, s]));
 
     if (this.byId.size !== states.length) throw new Error('Workflow state ids must be unique');
@@ -33,8 +30,6 @@ export class Workflow {
     return state;
   }
 
-  /** Shortest list of states to pass through to get from one state to another
-   *  ([] for the same state, null if it can't be reached). */
   pathTo(fromId, toId) {
     if (fromId === toId) return [];
     const previous = new Map([[fromId, null]]);
@@ -55,7 +50,6 @@ export class Workflow {
     return null;
   }
 
-  /** Human-readable reason a move is not allowed. */
   whyNot(fromId, toId) {
     const from = this.stateOf(fromId);
     if (from.isFinal) return `${from.label} is the final state; tasks there can only be reordered.`;

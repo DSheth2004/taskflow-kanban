@@ -1,6 +1,3 @@
-// Same midpoint math as server/src/lib/ordering.js. The client uses it only for its
-// optimistic guess; the server's orderIndex replaces it once the move is confirmed.
-
 export const STEP = 1000;
 
 export function orderBetween(prev, next) {
@@ -10,7 +7,6 @@ export function orderBetween(prev, next) {
   return (prev + next) / 2;
 }
 
-// Columns are derived from the id -> task map, so a card can only ever appear once.
 export function sortedColumn(tasks, columnId) {
   return Object.values(tasks)
     .filter((t) => t.columnId === columnId)

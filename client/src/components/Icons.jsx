@@ -1,4 +1,3 @@
-// Small inline icons (stroke-based, 20x20) so no icon library is needed.
 const base = {
   width: 18,
   height: 18,

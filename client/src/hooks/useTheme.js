@@ -6,7 +6,7 @@ function readStored() {
   try {
     return localStorage.getItem(KEY);
   } catch {
-    return null; // storage blocked (private mode, sandboxed iframe)
+    return null;
   }
 }
 
@@ -16,14 +16,11 @@ function apply(theme) {
   root.style.colorScheme = theme;
 }
 
-// The initial theme is already applied by the inline script in index.html; this hook
-// only reads it back and handles toggling afterwards.
 export function useTheme() {
   const [theme, setTheme] = useState(() =>
     document.documentElement.classList.contains('dark') ? 'dark' : 'light'
   );
 
-  // Follow OS changes until the user picks a theme explicitly.
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const onChange = (e) => {
@@ -42,9 +39,7 @@ export function useTheme() {
       apply(next);
       try {
         localStorage.setItem(KEY, next);
-      } catch {
-        // preference just won't persist
-      }
+      } catch {}
       return next;
     });
   }, []);
